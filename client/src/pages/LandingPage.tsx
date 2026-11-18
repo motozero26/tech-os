@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Wrench,
   CheckCircle2,
@@ -31,7 +31,11 @@ import {
   User,
   Phone,
   RefreshCw,
-  CheckCircle
+  CheckCircle,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  SlidersHorizontal
 } from 'lucide-react';
 import { api, setAuthToken, setSavedUser } from '../api.ts';
 
@@ -40,8 +44,29 @@ interface LandingPageProps {
   onLoginSuccess?: () => void;
 }
 
+// Hook de Scroll Reveal (IntersectionObserver)
+function useInView(options = { threshold: 0.15 }) {
+  const [isInView, setIsInView] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setIsInView(true);
+      }
+    }, options);
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, isInView] as const;
+}
+
 export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSuccess }) => {
-  const [activeTab, setActiveTab] = useState<'os' | 'pdv' | 'seminovos' | 'fiscal' | 'dashboard'>('os');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   // Modal de Compra e Checkout Direto
@@ -66,6 +91,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
   const [copiedPix, setCopiedPix] = useState(false);
   const [checkingPayment, setCheckingPayment] = useState(false);
   const [successData, setSuccessData] = useState<any | null>(null);
+
+  // Roda 3D de Telas (Shot Wheel Carousel)
+  const [wheelIndex, setWheelIndex] = useState(0);
+  const [isHoveringWheel, setIsHoveringWheel] = useState(false);
+
+  // Rotação automática suave da Roda 3D a cada 3,5 segundos
+  useEffect(() => {
+    if (isHoveringWheel) return;
+    const interval = setInterval(() => {
+      setWheelIndex((prev) => (prev + 1) % 5);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, [isHoveringWheel]);
 
   // Auto-polling para validação do pagamento em tempo real
   useEffect(() => {
@@ -193,10 +231,543 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
   if (billingCycle === 'quarterly') finalCalculatedPrice = (currentPlanPrice * 3) * 0.95;
   else if (billingCycle === 'annual') finalCalculatedPrice = (currentPlanPrice * 12) * 0.80;
 
+  // Telas da Roda 3D
+  const wheelScreens = [
+    {
+      id: 0,
+      tag: 'ORDENS DE SERVIÇO',
+      tagColor: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+      title: 'O.S. com Check-in Fotográfico',
+      subtitle: 'Evite acusações injustas de danos prévios com fotos no recibo.',
+      badge: 'Mais Utilizado'
+    },
+    {
+      id: 1,
+      tag: 'FRENTE DE CAIXA',
+      tagColor: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+      title: 'PDV Balcão & PIX Dinâmico',
+      subtitle: 'Venda peças e acessórios em segundos com QR Code na tela.',
+      badge: 'Alta Velocidade'
+    },
+    {
+      id: 2,
+      tag: 'MÓDULO FISCAL',
+      tagColor: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+      title: 'NF-e SEFAZ & NFS-e MEI Nacional',
+      subtitle: 'Emissão oficial em 1 clique direto pela Ordem de Serviço.',
+      badge: 'Exclusivo Plano Ouro'
+    },
+    {
+      id: 3,
+      tag: 'SEMINOVOS & USADOS',
+      tagColor: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20',
+      title: 'Compra e Venda de Usados',
+      subtitle: 'Termo de procedência legal com CPF e margem de lucro.',
+      badge: 'Alta Margem'
+    },
+    {
+      id: 4,
+      tag: 'DASHBOARD & FINANÇAS',
+      tagColor: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+      title: 'Métricas, Lucro e Comissões',
+      subtitle: 'Acompanhamento do ticket médio e comissão automática de técnicos.',
+      badge: 'Gestão 360°'
+    }
+  ];
+
+  // Componente Mockup da Janela do Sistema
+  const renderWindowMockup = (type: string) => {
+    if (type === 'os') {
+      return (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 text-left text-xs shadow-2xl space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500/80 inline-block" />
+              <span className="text-[11px] font-mono text-slate-400 ml-2 font-semibold">O.S. #1042 — Apple iPhone 14 Pro</span>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+              Aguardando Peça
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Cliente & Contato</span>
+              <div className="text-white font-bold text-xs truncate">Lucas Gabriel Mendes</div>
+              <div className="text-slate-400 text-[11px]">(11) 98765-4321</div>
+            </div>
+
+            <div className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Orçamento Aprovado</span>
+              <div className="text-emerald-400 font-mono font-black text-sm">R$ 730,00</div>
+              <div className="text-slate-400 text-[10px]">Tela OLED + Bateria</div>
+            </div>
+          </div>
+
+          {/* Fotos de Entrada */}
+          <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                <Camera className="w-3.5 h-3.5 text-blue-400" />
+                Check-in Fotográfico de Entrada
+              </span>
+              <span className="text-emerald-400 font-semibold">2 Fotos Registradas</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center text-[10px] text-slate-400">
+              <div className="h-16 rounded-lg bg-slate-950 border border-slate-800 flex flex-col items-center justify-center">
+                <span className="text-blue-400 font-bold mb-0.5">📸 Frontal</span>
+                <span>Vidro Trincado</span>
+              </div>
+              <div className="h-16 rounded-lg bg-slate-950 border border-slate-800 flex flex-col items-center justify-center">
+                <span className="text-blue-400 font-bold mb-0.5">📸 Chassi</span>
+                <span>Marcas no Aro</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 text-[11px] text-slate-400">
+            <span className="flex items-center gap-1 text-blue-300">
+              <QrCode className="w-3.5 h-3.5" />
+              QR Code WhatsApp Ativo
+            </span>
+            <span className="text-slate-500 font-mono">Entrada: 17/11 14:32</span>
+          </div>
+        </div>
+      );
+    }
+
+    if (type === 'pdv') {
+      return (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 text-left text-xs shadow-2xl space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500/80 inline-block" />
+              <span className="text-[11px] font-mono text-slate-400 ml-2 font-semibold">Frente de Caixa — PDV Rápido</span>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+              Caixa Aberto
+            </span>
+          </div>
+
+          <div className="space-y-2">
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-[11px]">
+              <div>
+                <div className="font-bold text-white">Cabo USB-C Trançado 60W</div>
+                <span className="text-slate-500 text-[10px]">SKU: CAB-USBC-60W</span>
+              </div>
+              <div className="font-mono text-white font-bold">R$ 45,00</div>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-[11px]">
+              <div>
+                <div className="font-bold text-white">Película 3D iPhone 14 Pro</div>
+                <span className="text-slate-500 text-[10px]">SKU: PEL-IPH14P</span>
+              </div>
+              <div className="font-mono text-white font-bold">R$ 35,00</div>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-gradient-to-r from-emerald-950/60 to-slate-900 border border-emerald-500/30 flex items-center justify-between">
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Total da Venda</span>
+              <div className="text-xl font-black text-emerald-400 font-mono">R$ 80,00</div>
+            </div>
+            <div className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-[11px] flex items-center gap-1.5 shadow-md">
+              <QrCode className="w-3.5 h-3.5" />
+              <span>PIX Dinâmico</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (type === 'fiscal') {
+      return (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 text-left text-xs shadow-2xl space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500/80 inline-block" />
+              <span className="text-[11px] font-mono text-slate-400 ml-2 font-semibold">Emissão Fiscal — SEFAZ Homologado</span>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500 text-slate-950">
+              Plano Ouro
+            </span>
+          </div>
+
+          <div className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2 font-mono text-[11px]">
+            <div className="flex items-center justify-between text-slate-400 text-[10px]">
+              <span>CHAVE DE ACESSO AUTORIZADA SEFAZ (44 DÍGITOS):</span>
+              <span className="text-emerald-400 font-bold">100 - Autorizado</span>
+            </div>
+            <div className="p-2 bg-slate-950 rounded text-amber-300 font-bold text-center tracking-wider text-[11px] select-all break-all">
+              35261110987654000199550010000000421298374652
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-between">
+              <span className="font-bold text-white">Espelho DANFE</span>
+              <span className="text-blue-400 font-bold">PDF Oficial</span>
+            </div>
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-lg flex items-center justify-between">
+              <span className="font-bold text-white">Download XML</span>
+              <span className="text-emerald-400 font-bold">SEFAZ MOC</span>
+            </div>
+          </div>
+
+          <div className="text-[10px] text-slate-400 text-center">
+            Suporta Certificado Digital A1 e NFS-e MEI Nacional de Serviços sem certificado.
+          </div>
+        </div>
+      );
+    }
+
+    if (type === 'seminovos') {
+      return (
+        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 text-left text-xs shadow-2xl space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80 inline-block" />
+              <span className="w-2.5 h-2.5 rounded-full bg-green-500/80 inline-block" />
+              <span className="text-[11px] font-mono text-slate-400 ml-2 font-semibold">Seminovos — Compra & Revenda</span>
+            </div>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              Margem: 42%
+            </span>
+          </div>
+
+          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
+            <div className="text-white font-bold text-xs">Apple iPhone 13 128GB Estelar</div>
+            <div className="text-slate-400 text-[10px] font-mono">IMEI: 359124098234123</div>
+            <div className="flex items-center gap-3 text-emerald-400 text-[11px] font-semibold pt-1">
+              <span>Bateria: 88%</span>
+              <span>•</span>
+              <span>Face ID: OK</span>
+              <span>•</span>
+              <span>Tela: Original</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            <div className="p-2.5 rounded-lg bg-slate-900/60 border border-slate-800">
+              <span className="text-slate-400 text-[10px] block">Pago ao Cliente</span>
+              <strong className="text-white font-mono text-sm">R$ 1.800</strong>
+            </div>
+            <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-800/40">
+              <span className="text-emerald-400 text-[10px] block">Venda Prevista</span>
+              <strong className="text-emerald-300 font-mono text-sm">R$ 2.550</strong>
+            </div>
+          </div>
+
+          <div className="text-[10px] text-slate-400">
+            Gera contrato de procedência com CPF do vendedor automaticamente.
+          </div>
+        </div>
+      );
+    }
+
+    // Default: Dashboard
+    return (
+      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 text-left text-xs shadow-2xl space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500/80 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-full bg-green-500/80 inline-block" />
+            <span className="text-[11px] font-mono text-slate-400 ml-2 font-semibold">TechOS — Indicadores & Resultados</span>
+          </div>
+          <span className="text-[10px] text-slate-400 font-mono">Mês Atual</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
+            <span className="text-[10px] text-slate-400 uppercase font-bold">Faturamento</span>
+            <div className="text-lg font-black text-white font-mono mt-0.5">R$ 28.450</div>
+            <span className="text-emerald-400 text-[10px] font-semibold">+18% crescimento</span>
+          </div>
+
+          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl">
+            <span className="text-[10px] text-slate-400 uppercase font-bold">O.S. Concluídas</span>
+            <div className="text-lg font-black text-blue-400 font-mono mt-0.5">142 reparos</div>
+            <span className="text-slate-400 text-[10px]">98% sem garantia</span>
+          </div>
+        </div>
+
+        <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-[11px]">
+          <div>
+            <div className="text-slate-400 text-[10px]">Comissões dos Técnicos</div>
+            <strong className="text-amber-400 font-mono text-sm">R$ 3.840,00</strong>
+          </div>
+          <span className="text-[10px] text-slate-500 font-bold">Cálculo Automático</span>
+        </div>
+      </div>
+    );
+  };
+
+  // Seções modulares individuais com Scroll Reveal e 3D Tilt
+  const SectionOS = () => {
+    const [ref, inView] = useInView();
+    return (
+      <div
+        ref={ref}
+        className="py-16 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center"
+      >
+        <div
+          className="lg:col-span-6 space-y-5 transition-all duration-700"
+          style={{
+            opacity: inView ? 1 : 0,
+            transform: inView ? 'translateY(0)' : 'translateY(1.5rem)'
+          }}
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 text-xs font-bold uppercase tracking-wider">
+            <Smartphone className="w-3.5 h-3.5" />
+            <span>Módulo de Bancada</span>
+          </div>
+          <h3 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            Ordens de Serviço com Fotos de Entrada e Termo de Garantia
+          </h3>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Elimine contestações de riscos e telas trincadas na hora da entrega. Fotografe o aparelho na entrada, registre o laudo técnico completo e imprima o comprovante com QR Code para o cliente consultar o status no WhatsApp.
+          </p>
+
+          <ul className="space-y-2.5 text-xs text-slate-300">
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Check-in fotográfico frontal, traseiro e laterais</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Controle de status em tempo real (Aguardando Peça, Em Análise, Pronto)</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Geração de orçamento e baixa automática de peças no estoque</span>
+            </li>
+          </ul>
+
+          <button
+            onClick={() => handleOpenCheckout(1)}
+            className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-xs shadow-lg shadow-blue-600/30 transition flex items-center gap-2"
+          >
+            <span>Assinar Plano com O.S. Ilimitada</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div
+          className="lg:col-span-6 transition-all duration-1000"
+          style={{
+            perspective: '1200px',
+            transform: inView ? 'perspective(1200px) rotateY(-15deg) rotateX(3.5deg) translateY(0)' : 'perspective(1200px) rotateY(-6deg) translateY(2rem)',
+            opacity: inView ? 1 : 0.35
+          }}
+        >
+          {renderWindowMockup('os')}
+        </div>
+      </div>
+    );
+  };
+
+  const SectionPDV = () => {
+    const [ref, inView] = useInView();
+    return (
+      <div
+        ref={ref}
+        className="py-16 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center"
+      >
+        <div
+          className="lg:col-span-6 order-2 lg:order-1 transition-all duration-1000"
+          style={{
+            perspective: '1200px',
+            transform: inView ? 'perspective(1200px) rotateY(15deg) rotateX(3.5deg) translateY(0)' : 'perspective(1200px) rotateY(6deg) translateY(2rem)',
+            opacity: inView ? 1 : 0.35
+          }}
+        >
+          {renderWindowMockup('pdv')}
+        </div>
+
+        <div
+          className="lg:col-span-6 order-1 lg:order-2 space-y-5 transition-all duration-700"
+          style={{
+            opacity: inView ? 1 : 0,
+            transform: inView ? 'translateY(0)' : 'translateY(1.5rem)'
+          }}
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+            <Receipt className="w-3.5 h-3.5" />
+            <span>Frente de Balcão</span>
+          </div>
+          <h3 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            Frente de Caixa Ágil com PIX Dinâmico Integrado
+          </h3>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Faça vendas rápidas de acessórios e cabos sem complicação. O sistema calcula automaticamente o troco, aplica descontos, simula parcelamento da maquininha com taxas e gera o QR Code PIX direto na tela para o cliente escanear.
+          </p>
+
+          <ul className="space-y-2.5 text-xs text-slate-300">
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Leitor de código de barras ou busca instantânea por nome</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Abertura, conferência de sangria e suprimento sem divergência</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-emerald-400" />
+              <span>Fechamento de caixa com relatório de comissões por vendedor</span>
+            </li>
+          </ul>
+
+          <button
+            onClick={() => handleOpenCheckout(1)}
+            className="px-6 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs shadow-lg shadow-emerald-600/30 transition flex items-center gap-2"
+          >
+            <span>Quero Operar com Esse PDV</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const SectionFiscal = () => {
+    const [ref, inView] = useInView();
+    return (
+      <div
+        ref={ref}
+        className="py-16 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center"
+      >
+        <div
+          className="lg:col-span-6 space-y-5 transition-all duration-700"
+          style={{
+            opacity: inView ? 1 : 0,
+            transform: inView ? 'translateY(0)' : 'translateY(1.5rem)'
+          }}
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 text-xs font-bold uppercase tracking-wider">
+            <FileText className="w-3.5 h-3.5" />
+            <span>Exclusivo Plano Ouro</span>
+          </div>
+          <h3 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            Emissão Fiscal SEFAZ (NF-e & NFS-e MEI) sem Sistemas Caros
+          </h3>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Economize até R$ 200 por mês eliminando emissores fiscais paralelos. Emita NF-e Modelo 55 para produtos com seu Certificado Digital A1 ou emita NFS-e MEI de serviços pelo Padrão Nacional dispensando certificado.
+          </p>
+
+          <ul className="space-y-2.5 text-xs text-slate-300">
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-amber-400" />
+              <span>Emissão com 1 clique diretamente da Ordem de Serviço ou PDV</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-amber-400" />
+              <span>Cálculo automático de chave SEFAZ e dígito verificador Módulo 11</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-amber-400" />
+              <span>Download oficial do arquivo XML e impressão do espelho DANFE</span>
+            </li>
+          </ul>
+
+          <button
+            onClick={() => handleOpenCheckout(2)}
+            className="px-6 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 transition flex items-center gap-2"
+          >
+            <span>Contratar Plano Ouro com Módulo Fiscal</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div
+          className="lg:col-span-6 transition-all duration-1000"
+          style={{
+            perspective: '1200px',
+            transform: inView ? 'perspective(1200px) rotateY(-15deg) rotateX(3.5deg) translateY(0)' : 'perspective(1200px) rotateY(-6deg) translateY(2rem)',
+            opacity: inView ? 1 : 0.35
+          }}
+        >
+          {renderWindowMockup('fiscal')}
+        </div>
+      </div>
+    );
+  };
+
+  const SectionSeminovos = () => {
+    const [ref, inView] = useInView();
+    return (
+      <div
+        ref={ref}
+        className="py-16 grid grid-cols-1 lg:grid-cols-12 gap-10 items-center"
+      >
+        <div
+          className="lg:col-span-6 order-2 lg:order-1 transition-all duration-1000"
+          style={{
+            perspective: '1200px',
+            transform: inView ? 'perspective(1200px) rotateY(15deg) rotateX(3.5deg) translateY(0)' : 'perspective(1200px) rotateY(6deg) translateY(2rem)',
+            opacity: inView ? 1 : 0.35
+          }}
+        >
+          {renderWindowMockup('seminovos')}
+        </div>
+
+        <div
+          className="lg:col-span-6 order-1 lg:order-2 space-y-5 transition-all duration-700"
+          style={{
+            opacity: inView ? 1 : 0,
+            transform: inView ? 'translateY(0)' : 'translateY(1.5rem)'
+          }}
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-400 text-xs font-bold uppercase tracking-wider">
+            <Boxes className="w-3.5 h-3.5" />
+            <span>Mercado de Aparelhos Usados</span>
+          </div>
+          <h3 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+            Compre Celulares com Segurança Jurídica e Revenda com Lucro
+          </h3>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            Proteja sua loja contra aparelhos com queixa de furto ou impedimento. O sistema gera automaticamente o Termo de Procedência com CPF e assinatura do vendedor, além de calcular sua margem de lucro exata na revenda.
+          </p>
+
+          <ul className="space-y-2.5 text-xs text-slate-300">
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-indigo-400" />
+              <span>Checklist técnico de bateria, biometria, câmeras e IMEI</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-indigo-400" />
+              <span>Contrato de compra e venda personalizado pronto para imprimir</span>
+            </li>
+            <li className="flex items-center gap-2">
+              <Check className="w-4 h-4 text-indigo-400" />
+              <span>Entrada automática no estoque de aparelhos seminovos</span>
+            </li>
+          </ul>
+
+          <button
+            onClick={() => handleOpenCheckout(1)}
+            className="px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs shadow-lg shadow-indigo-600/30 transition flex items-center gap-2"
+          >
+            <span>Começar a Usar Seminovos</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white font-sans">
       {/* 1. TOP NAVBAR */}
-      <header className="sticky top-0 z-50 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
+      <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
@@ -252,7 +823,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
       </header>
 
       {/* 2. HERO SECTION */}
-      <section className="relative pt-16 pb-20 md:pt-24 md:pb-28 overflow-hidden">
+      <section className="relative pt-16 pb-16 md:pt-24 md:pb-24 overflow-hidden">
         {/* Glow Backgrounds */}
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[350px] bg-blue-600/15 blur-[120px] rounded-full pointer-events-none" />
         <div className="absolute top-1/3 left-1/3 w-[300px] h-[300px] bg-indigo-500/10 blur-[100px] rounded-full pointer-events-none" />
@@ -286,7 +857,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
               href="#telas"
               className="w-full sm:w-auto px-7 py-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-base border border-slate-800 hover:border-slate-700 transition flex items-center justify-center gap-2"
             >
-              <span>Ver Demonstração das Telas</span>
+              <span>Ver Telas em 3D</span>
               <ChevronDown className="w-4 h-4" />
             </a>
           </div>
@@ -313,501 +884,247 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
         </div>
       </section>
 
-      {/* 3. SHOWCASE INTERATIVO DE TELAS (COMO FUNCIONA NA PRÁTICA) */}
-      <section id="telas" className="py-20 bg-slate-900/60 border-y border-slate-800/80">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-12">
+      {/* 3. A RODA 3D DE TELAS EM LEQUE (SHOT WHEEL) — ESTILO DSHOP PRO */}
+      <section
+        id="telas"
+        className="py-20 bg-slate-900/80 border-y border-slate-800/80 relative overflow-hidden"
+        onMouseEnter={() => setIsHoveringWheel(true)}
+        onMouseLeave={() => setIsHoveringWheel(false)}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
+          <div className="max-w-3xl mx-auto mb-10">
             <span className="text-xs font-extrabold text-blue-400 tracking-wider uppercase">
-              Demonstração Prática
+              Showcase Tridimensional
             </span>
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">
-              Interface Desenvolvida para a Bancada e Balcão
+              As Telas do Sistema em Funcionamento
             </h2>
-            <p className="text-slate-400 text-sm mt-3">
-              Sem telas confusas ou dezenas de cliques. Veja as telas principais operando em tempo real:
+            <p className="text-slate-400 text-sm mt-2">
+              Veja as principais telas do TechOS operando no espaço tridimensional. Clique nas setas ou selecione qualquer módulo:
             </p>
           </div>
 
-          {/* Seletor de Abas de Telas */}
-          <div className="flex flex-wrap items-center justify-center gap-2 mb-8">
+          {/* Navegador de Abas Rápidas */}
+          <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
+            {wheelScreens.map((s, idx) => (
+              <button
+                key={s.id}
+                onClick={() => setWheelIndex(idx)}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  wheelIndex === idx
+                    ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
+                    : 'bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}
+              >
+                <span>{s.tag}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* Palco Central 3D */}
+          <div
+            className="relative w-full h-[400px] sm:h-[450px] flex items-center justify-center my-6"
+            style={{ perspective: '1600px', perspectiveOrigin: '50% 65%' }}
+          >
+            {wheelScreens.map((screen, idx) => {
+              // Cálculo de offset circular no intervalo [-2, 2]
+              let offset = (idx - wheelIndex + 5) % 5;
+              if (offset > 2) offset -= 5;
+
+              // Estilos 3D dependendo do slot
+              let transform = '';
+              let zIndex = 1;
+              let opacity = 0;
+              let pointerEvents: 'auto' | 'none' = 'none';
+
+              if (offset === 0) {
+                // Ativo (Centro)
+                transform = 'translate3d(0, 0, 70px) rotateY(0deg) scale(1)';
+                zIndex = 10;
+                opacity = 1;
+                pointerEvents = 'auto';
+              } else if (offset === -1) {
+                // Esquerda Imediata
+                transform = 'translate3d(-240px, 15px, -60px) rotateY(-25deg) scale(0.86)';
+                zIndex = 7;
+                opacity = 0.7;
+                pointerEvents = 'auto';
+              } else if (offset === 1) {
+                // Direita Imediata
+                transform = 'translate3d(240px, 15px, -60px) rotateY(25deg) scale(0.86)';
+                zIndex = 7;
+                opacity = 0.7;
+                pointerEvents = 'auto';
+              } else if (offset === -2) {
+                // Extrema Esquerda
+                transform = 'translate3d(-420px, 30px, -180px) rotateY(-40deg) scale(0.72)';
+                zIndex = 4;
+                opacity = 0.35;
+                pointerEvents = 'auto';
+              } else if (offset === 2) {
+                // Extrema Direita
+                transform = 'translate3d(420px, 30px, -180px) rotateY(40deg) scale(0.72)';
+                zIndex = 4;
+                opacity = 0.35;
+                pointerEvents = 'auto';
+              }
+
+              const typeMap = ['os', 'pdv', 'fiscal', 'seminovos', 'dashboard'];
+
+              return (
+                <div
+                  key={screen.id}
+                  onClick={() => setWheelIndex(idx)}
+                  className="absolute w-[92vw] max-w-[500px] cursor-pointer"
+                  style={{
+                    transform,
+                    zIndex,
+                    opacity,
+                    pointerEvents,
+                    transition: 'transform 0.85s cubic-bezier(0.33, 1, 0.32, 1), opacity 0.85s ease',
+                    willChange: 'transform, opacity'
+                  }}
+                >
+                  <div
+                    className={`rounded-2xl transition-all ${
+                      offset === 0
+                        ? 'ring-2 ring-blue-500/50 shadow-2xl shadow-blue-500/20'
+                        : 'hover:opacity-100'
+                    }`}
+                  >
+                    {renderWindowMockup(typeMap[screen.id])}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Setas Laterais de Navegação */}
             <button
-              onClick={() => setActiveTab('os')}
-              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 ${
-                activeTab === 'os'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              onClick={() => setWheelIndex((prev) => (prev - 1 + 5) % 5)}
+              className="absolute left-2 sm:left-10 z-20 p-3 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition shadow-xl"
             >
-              <Smartphone className="w-4 h-4" />
-              <span>1. Ordens de Serviço (O.S.)</span>
+              <ChevronLeft className="w-5 h-5" />
             </button>
 
             <button
-              onClick={() => setActiveTab('pdv')}
-              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 ${
-                activeTab === 'pdv'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
+              onClick={() => setWheelIndex((prev) => (prev + 1) % 5)}
+              className="absolute right-2 sm:right-10 z-20 p-3 rounded-full bg-slate-900/80 hover:bg-slate-800 border border-slate-700 text-slate-300 hover:text-white transition shadow-xl"
             >
-              <Receipt className="w-4 h-4" />
-              <span>2. Frente de Caixa & PDV</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('seminovos')}
-              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 ${
-                activeTab === 'seminovos'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <Boxes className="w-4 h-4" />
-              <span>3. Seminovos & Usados</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('fiscal')}
-              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 ${
-                activeTab === 'fiscal'
-                  ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/30'
-                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <FileText className="w-4 h-4 text-amber-300" />
-              <span>4. Módulo Fiscal SEFAZ</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-2 ${
-                activeTab === 'dashboard'
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
-                  : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>5. Dashboard & Financeiro</span>
+              <ChevronRight className="w-5 h-5" />
             </button>
           </div>
 
-          {/* Mockup da Tela Selecionada */}
-          <div className="bg-slate-950 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden p-6 sm:p-8 max-w-5xl mx-auto">
-            {activeTab === 'os' && (
-              <div className="space-y-6">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl font-black text-white font-mono">O.S. #1042</span>
-                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                        Aguardando Peça
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Cliente: <strong>Lucas Gabriel Mendes</strong> • (11) 98765-4321 • Entrada: 17/11/2026 14:32
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                      <Printer className="w-3.5 h-3.5 text-blue-400" />
-                      Termo de Garantia c/ QR Code
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-3">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Equipamento</span>
-                    <div className="text-sm font-bold text-white flex items-center gap-2">
-                      <Smartphone className="w-4 h-4 text-blue-400" />
-                      iPhone 14 Pro 128GB Grafite
-                    </div>
-                    <p className="text-xs text-slate-300">
-                      <strong>Defeito Relatado:</strong> Tela trincada após queda, sem touch e bateria descarregando rápido.
-                    </p>
-                    <div className="pt-2 border-t border-slate-800 text-[11px] text-slate-400">
-                      Senha de Desbloqueio: <span className="font-mono text-slate-200">140792</span>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-3">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                      <span>Fotos de Check-in</span>
-                      <span className="text-emerald-400 text-[11px]">2 fotos anexadas</span>
-                    </span>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="h-20 rounded-lg bg-slate-950 border border-slate-800 flex flex-col items-center justify-center text-slate-500 text-[11px]">
-                        <Camera className="w-5 h-5 text-blue-400 mb-1" />
-                        <span>Frente (Trincada)</span>
-                      </div>
-                      <div className="h-20 rounded-lg bg-slate-950 border border-slate-800 flex flex-col items-center justify-center text-slate-500 text-[11px]">
-                        <Camera className="w-5 h-5 text-blue-400 mb-1" />
-                        <span>Lateral (Riscos)</span>
-                      </div>
-                    </div>
-                    <p className="text-[11px] text-slate-400">
-                      Evita contestações de danos pré-existentes na entrega.
-                    </p>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900/80 border border-slate-800/80 space-y-3">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Orçamento & Peças</span>
-                    <div className="space-y-1 text-xs">
-                      <div className="flex justify-between text-slate-300">
-                        <span>1x Tela OLED iPhone 14 Pro</span>
-                        <strong className="text-white font-mono">R$ 580,00</strong>
-                      </div>
-                      <div className="flex justify-between text-slate-300">
-                        <span>1x Mão de Obra Especializada</span>
-                        <strong className="text-white font-mono">R$ 150,00</strong>
-                      </div>
-                    </div>
-                    <div className="pt-2 border-t border-slate-800 flex justify-between items-center text-sm font-extrabold">
-                      <span className="text-slate-300">Total O.S.:</span>
-                      <span className="text-emerald-400 font-mono text-base">R$ 730,00</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-blue-950/40 border border-blue-800/50 rounded-xl flex items-center justify-between text-xs text-blue-300">
-                  <span className="flex items-center gap-2">
-                    <QrCode className="w-4 h-4 text-blue-400" />
-                    O cliente acompanha o status do reparo pelo link do WhatsApp sem ligar para a loja.
-                  </span>
-                  <span className="font-bold text-white">Disponível em todos os planos</span>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'pdv' && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                  <div>
-                    <h3 className="text-xl font-black text-white">Frente de Caixa Rápida (PDV)</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Operação com leitor de código de barras ou busca instantânea.</p>
-                  </div>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    Caixa Aberto (Sessão #48)
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="md:col-span-2 space-y-3">
-                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs font-semibold text-slate-400">
-                      <span>Item</span>
-                      <span>Qtd x Preço</span>
-                      <span>Total</span>
-                    </div>
-                    <div className="space-y-2 text-xs">
-                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                        <div>
-                          <div className="font-bold text-white">Cabo USB-C Trançado 1.5m 60W</div>
-                          <span className="text-slate-500 text-[11px]">SKU: ACC-USB-01</span>
-                        </div>
-                        <div className="text-slate-300 font-mono">1 x R$ 45,00</div>
-                        <div className="font-bold text-emerald-400 font-mono">R$ 45,00</div>
-                      </div>
-
-                      <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                        <div>
-                          <div className="font-bold text-white">Película de Vidro 3D iPhone 14 Pro</div>
-                          <span className="text-slate-500 text-[11px]">SKU: PEL-IP14P</span>
-                        </div>
-                        <div className="text-slate-300 font-mono">1 x R$ 35,00</div>
-                        <div className="font-bold text-emerald-400 font-mono">R$ 35,00</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 flex flex-col justify-between space-y-4">
-                    <div>
-                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Subtotal da Venda</span>
-                      <div className="text-3xl font-black text-white font-mono mt-1">R$ 80,00</div>
-                      <div className="text-xs text-slate-400 mt-2 space-y-1">
-                        <div className="flex justify-between">
-                          <span>Forma:</span>
-                          <strong className="text-blue-400">PIX Dinâmico</strong>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Taxa:</span>
-                          <strong className="text-emerald-400">R$ 0,00 (Sem desconto)</strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    <button className="w-full py-3 bg-emerald-600 text-white font-extrabold text-xs rounded-xl shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-2">
-                      <QrCode className="w-4 h-4" />
-                      <span>Gerar QR Code PIX na Tela</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'seminovos' && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                  <div>
-                    <h3 className="text-xl font-black text-white">Módulo Especializado em Seminovos & Usados</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Compre de clientes com segurança jurídica e coloque na vitrine de revenda.</p>
-                  </div>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                    Margem Lucro: 42%
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                    <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Aparelho Adquirido</span>
-                    <div className="text-sm font-bold text-white">iPhone 13 128GB Estelar</div>
-                    <div className="text-slate-400 font-mono">IMEI: 359124098234123</div>
-                    <div className="flex items-center gap-2 text-emerald-400 font-semibold">
-                      <span>Saúde Bateria: 88%</span>
-                      <span>•</span>
-                      <span>Biometria: OK</span>
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                    <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Contrato de Compra</span>
-                    <div className="text-slate-300">
-                      Gera automaticamente o <strong>Termo de Procedência Legal</strong> com CPF e assinatura do vendedor, blindando sua loja contra aparelhos com impedimento.
-                    </div>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
-                    <span className="text-slate-400 font-bold uppercase tracking-wider text-[11px]">Precificação & Lucro</span>
-                    <div className="flex justify-between text-slate-300">
-                      <span>Valor Pago ao Cliente:</span>
-                      <strong className="text-white font-mono">R$ 1.800,00</strong>
-                    </div>
-                    <div className="flex justify-between text-slate-300">
-                      <span>Preço Sugerido Venda:</span>
-                      <strong className="text-emerald-400 font-mono">R$ 2.550,00</strong>
-                    </div>
-                    <div className="pt-2 border-t border-slate-800 text-emerald-400 font-bold">
-                      Lucro Previsto: + R$ 750,00
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'fiscal' && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-xl font-black text-white">Módulo Fiscal SEFAZ Integrado</h3>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-slate-950">
-                        Exclusivo Plano Ouro
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">Emissão de NF-e Modelo 55 (Produtos) e NFS-e MEI Nacional sem complicação.</p>
-                  </div>
-                  <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    Certificado Digital A1 Ativo
-                  </span>
-                </div>
-
-                <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3 font-mono text-xs">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between text-slate-400 text-[11px] gap-2">
-                    <span>CHAVE DE ACESSO AUTORIZADA SEFAZ (44 DÍGITOS):</span>
-                    <span className="text-emerald-400 font-bold">Status: 100 - Autorizado o uso da NF-e</span>
-                  </div>
-                  <div className="p-3 bg-slate-950 rounded-lg text-amber-300 font-semibold text-center tracking-wider break-all select-all">
-                    35261110987654000199550010000000421298374652
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-[11px] text-slate-400">
-                    <div>Modelo: <strong className="text-white">55 (NF-e)</strong></div>
-                    <div>Série: <strong className="text-white">1</strong></div>
-                    <div>Número: <strong className="text-white">000.042</strong></div>
-                    <div>Ambiente: <strong className="text-emerald-400">Produção</strong></div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-                    <div>
-                      <div className="font-bold text-white">Espelho DANFE Oficial</div>
-                      <span className="text-slate-400 text-[11px]">Visualização e impressão direta em PDF</span>
-                    </div>
-                    <button className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs">
-                      Ver DANFE
-                    </button>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
-                    <div>
-                      <div className="font-bold text-white">Download XML Homologado</div>
-                      <span className="text-slate-400 text-[11px]">Envio direto para seu contador</span>
-                    </div>
-                    <button className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs">
-                      Baixar XML
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === 'dashboard' && (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800">
-                  <div>
-                    <h3 className="text-xl font-black text-white">Dashboard & Indicadores em Tempo Real</h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Visão 360° do faturamento diário, mensal e ticket médio.</p>
-                  </div>
-                  <span className="text-xs text-slate-400">Mês Vigente</span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase">Faturamento Mês</span>
-                    <div className="text-2xl font-black text-white font-mono mt-1">R$ 28.450</div>
-                    <span className="text-[11px] text-emerald-400 font-semibold">+18% vs mês anterior</span>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase">O.S. Concluídas</span>
-                    <div className="text-2xl font-black text-blue-400 font-mono mt-1">142</div>
-                    <span className="text-[11px] text-slate-400">98% de entrega no prazo</span>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase">Ticket Médio O.S.</span>
-                    <div className="text-2xl font-black text-indigo-400 font-mono mt-1">R$ 185</div>
-                    <span className="text-[11px] text-emerald-400 font-semibold">Peças + Mão de obra</span>
-                  </div>
-
-                  <div className="p-4 rounded-xl bg-slate-900 border border-slate-800">
-                    <span className="text-[11px] font-bold text-slate-400 uppercase">Comissões Técnicos</span>
-                    <div className="text-2xl font-black text-amber-400 font-mono mt-1">R$ 3.840</div>
-                    <span className="text-[11px] text-slate-400">Cálculo automático</span>
-                  </div>
-                </div>
-              </div>
-            )}
+          {/* Legenda Dinâmica da Tela Ativa */}
+          <div className="max-w-md mx-auto p-4 rounded-2xl bg-slate-950/80 border border-slate-800 shadow-xl mt-4">
+            <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase mb-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20">
+              {wheelScreens[wheelIndex].badge}
+            </div>
+            <h4 className="text-base font-extrabold text-white">
+              {wheelScreens[wheelIndex].title}
+            </h4>
+            <p className="text-xs text-slate-400 mt-1">
+              {wheelScreens[wheelIndex].subtitle}
+            </p>
           </div>
         </div>
       </section>
 
-      {/* 4. RECURSOS ESSENCIAIS (GRID COM O QUE O TÉCNICO REALMENTE PRECISA) */}
-      <section id="recursos" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      {/* 4. SHOWCASE MODULAR COM SCROLL REVEAL E 3D TILT (AO DESCER A PÁGINA) */}
+      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <span className="text-xs font-extrabold text-blue-400 tracking-wider uppercase">
-            Tudo o Que Sua Loja Precisa
+            Engenharia de Ponta
           </span>
-          <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">
-            Funcionalidades Pensadas para a Rotina Real
+          <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tight mt-2">
+            Cada Módulo Criado para a Realidade da Oficina
           </h2>
           <p className="text-slate-400 text-sm mt-3">
-            Construído para eliminar a dor de cabeça do técnico e do lojista. Tudo o que importa, sem enrolação.
+            Conheça os detalhes técnicos que fazem o TechOS ser a plataforma mais recomendada por especialistas de bancada:
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
-            <div className="w-12 h-12 rounded-xl bg-blue-600/10 text-blue-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Camera className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Check-in de O.S. com Fotos</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Fotografe o estado físico do aparelho logo na entrada (riscos, trincados ou marcas). Registre no sistema e evite acusações injustas de clientes na retirada.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
-            <div className="w-12 h-12 rounded-xl bg-emerald-600/10 text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Receipt className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Frente de Caixa Rápida & PIX</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Venda acessórios, películas e cabos em segundos. O sistema calcula troco, simula parcelamento na maquininha e gera o PIX dinâmico na hora.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
-            <div className="w-12 h-12 rounded-xl bg-amber-600/10 text-amber-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <FileText className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Nota Fiscal SEFAZ (NF-e & NFS-e)</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Emita NF-e Modelo 55 (Produtos) com Certificado Digital A1 ou NFS-e MEI Nacional de serviços direto pela Ordem de Serviço, em 1 clique.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
-            <div className="w-12 h-12 rounded-xl bg-indigo-600/10 text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Boxes className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Gestão de Seminovos</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Compre celulares usados de clientes gerando automaticamente o termo de procedência com CPF, garantindo total segurança contra bloqueios ou golpes.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
-            <div className="w-12 h-12 rounded-xl bg-cyan-600/10 text-cyan-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <QrCode className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Termos com QR Code WhatsApp</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Imprima comprovantes de entrada com termos de garantia personalizáveis e QR Code para o cliente consultar o andamento da O.S. pelo celular.
-            </p>
-          </div>
-
-          <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
-            <div className="w-12 h-12 rounded-xl bg-violet-600/10 text-violet-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-              <Headphones className="w-6 h-6" />
-            </div>
-            <h3 className="text-lg font-bold text-white mb-2">Suporte Humanizado Especializado</h3>
-            <p className="text-slate-400 text-xs leading-relaxed">
-              Não fique falando com robôs. Nossa equipe entende a rotina de bancada e ajuda sua loja via WhatsApp sempre que você precisar.
-            </p>
-          </div>
+        {/* 4 Seções Modulares com Animação em Zigue-Zague */}
+        <div className="space-y-12">
+          <SectionOS />
+          <SectionPDV />
+          <SectionFiscal />
+          <SectionSeminovos />
         </div>
       </section>
 
-      {/* 5. COMO FUNCIONA (PASSO A PASSO DIRETO) */}
-      <section id="como-funciona" className="py-20 bg-slate-900/40 border-t border-slate-800/80">
+      {/* 5. RECURSOS ESSENCIAIS (GRID COM O QUE O TÉCNICO REALMENTE PRECISA) */}
+      <section id="recursos" className="py-20 bg-slate-900/40 border-t border-slate-800/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-2xl mx-auto mb-16">
+          <div className="text-center max-w-3xl mx-auto mb-16">
             <span className="text-xs font-extrabold text-blue-400 tracking-wider uppercase">
-              Simples e Rápido
+              Tudo o Que Sua Loja Precisa
             </span>
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">
-              Como Funciona a Contratação
+              Funcionalidades Pensadas para a Rotina Real
             </h2>
+            <p className="text-slate-400 text-sm mt-3">
+              Construído para eliminar a dor de cabeça do técnico e do lojista. Tudo o que importa, sem enrolação.
+            </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
-            <div className="text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-lg shadow-blue-600/30">
-                1
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
+              <div className="w-12 h-12 rounded-xl bg-blue-600/10 text-blue-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Camera className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-bold text-white">Escolha Seu Plano</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Selecione entre o Plano Prata (gestão completa sem nota) ou Plano Ouro (com emissor fiscal SEFAZ).
+              <h3 className="text-lg font-bold text-white mb-2">Check-in de O.S. com Fotos</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Fotografe o estado físico do aparelho logo na entrada (riscos, trincados ou marcas). Registre no sistema e evite acusações injustas de clientes na retirada.
               </p>
             </div>
 
-            <div className="text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
-                2
+            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
+              <div className="w-12 h-12 rounded-xl bg-emerald-600/10 text-emerald-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Receipt className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-bold text-white">Pague com PIX Imediato</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Preencha os dados da sua loja e escaneie o QR Code PIX. O pagamento é aprovado em segundos pelo banco.
+              <h3 className="text-lg font-bold text-white mb-2">Frente de Caixa Rápida & PIX</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Venda acessórios, películas e cabos em segundos. O sistema calcula troco, simula parcelamento na maquininha e gera o PIX dinâmico na hora.
               </p>
             </div>
 
-            <div className="text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-emerald-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-lg shadow-emerald-600/30">
-                3
+            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
+              <div className="w-12 h-12 rounded-xl bg-amber-600/10 text-amber-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <FileText className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-bold text-white">Acesso Liberado & E-mail</h3>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Assim que validado, você recebe a confirmação no e-mail e seu acesso entra em funcionamento na hora.
+              <h3 className="text-lg font-bold text-white mb-2">Nota Fiscal SEFAZ (NF-e & NFS-e)</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Emita NF-e Modelo 55 (Produtos) com Certificado Digital A1 ou NFS-e MEI Nacional de serviços direto pela Ordem de Serviço, em 1 clique.
+              </p>
+            </div>
+
+            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
+              <div className="w-12 h-12 rounded-xl bg-indigo-600/10 text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Boxes className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Gestão de Seminovos</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Compre celulares usados de clientes gerando automaticamente o termo de procedência com CPF, garantindo total segurança contra bloqueios ou golpes.
+              </p>
+            </div>
+
+            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
+              <div className="w-12 h-12 rounded-xl bg-cyan-600/10 text-cyan-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <QrCode className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Termos com QR Code WhatsApp</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Imprima comprovantes de entrada com termos de garantia personalizáveis e QR Code para o cliente consultar o andamento da O.S. pelo celular.
+              </p>
+            </div>
+
+            <div className="p-6 rounded-2xl bg-slate-900/70 border border-slate-800 hover:border-blue-500/40 transition-all hover:bg-slate-900 group">
+              <div className="w-12 h-12 rounded-xl bg-violet-600/10 text-violet-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                <Headphones className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2">Suporte Humanizado Especializado</h3>
+              <p className="text-slate-400 text-xs leading-relaxed">
+                Não fique falando com robôs. Nossa equipe entende a rotina de bancada e ajuda sua loja via WhatsApp sempre que você precisar.
               </p>
             </div>
           </div>
