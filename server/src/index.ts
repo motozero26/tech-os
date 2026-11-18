@@ -62,6 +62,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   res.status(500).json({ error: err.message || 'Erro interno no servidor' });
 });
 
-app.listen(PORT, () => {
-  console.log(`[TechOS API] Servidor rodando na porta ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[TechOS API] Servidor rodando na porta ${PORT}`);
+  });
+}
+
+export default app;
+export { app };

@@ -4,7 +4,7 @@ import fs from 'fs';
 import bcrypt from 'bcryptjs';
 
 const baseDir = process.cwd().endsWith('server') ? path.resolve(process.cwd(), '..') : process.cwd();
-const dbDir = path.resolve(baseDir, 'data');
+const dbDir = process.env.VERCEL ? path.join('/tmp', 'data') : path.resolve(baseDir, 'data');
 if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
