@@ -1,5 +1,7 @@
 # TechOS — Sistema de Gestão para Assistência Técnica & Varejo
 
+[![GitHub Repository](https://img.shields.io/badge/GitHub-motozero26%2Ftech--os-blue?logo=github)](https://github.com/motozero26/tech-os)
+
 Sistema SaaS multi-tenant completo para gestão operacional, financeira, comercial e fiscal de lojas de assistência técnica e varejo (smartphones, computadores e eletrônicos).
 
 ---
