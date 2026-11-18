@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Wrench,
   CheckCircle2,
@@ -23,20 +23,175 @@ import {
   X,
   CreditCard,
   DollarSign,
-  AlertCircle
+  AlertCircle,
+  Copy,
+  Mail,
+  Lock,
+  Building,
+  User,
+  Phone,
+  RefreshCw,
+  CheckCircle
 } from 'lucide-react';
+import { api, setAuthToken, setSavedUser } from '../api.ts';
 
 interface LandingPageProps {
-  onGoToLogin: (planName?: string) => void;
+  onGoToLogin: () => void;
+  onLoginSuccess?: () => void;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSuccess }) => {
   const [activeTab, setActiveTab] = useState<'os' | 'pdv' | 'seminovos' | 'fiscal' | 'dashboard'>('os');
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
+  // Modal de Compra e Checkout Direto
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [checkoutStep, setCheckoutStep] = useState<'form' | 'payment' | 'success'>('form');
+  const [selectedPlanId, setSelectedPlanId] = useState<number>(2); // 1 = Prata, 2 = Ouro
+  const [billingCycle, setBillingCycle] = useState<'monthly' | 'quarterly' | 'annual'>('monthly');
+  const [paymentMethod, setPaymentMethod] = useState<'PIX' | 'Cartão de Crédito'>('PIX');
+
+  // Form Fields
+  const [companyName, setCompanyName] = useState('');
+  const [cnpjCpf, setCnpjCpf] = useState('');
+  const [phone, setPhone] = useState('');
+  const [adminName, setAdminName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [adminPassword, setAdminPassword] = useState('');
+
+  // Checkout State & Response
+  const [loading, setLoading] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [checkoutResult, setCheckoutResult] = useState<any | null>(null);
+  const [copiedPix, setCopiedPix] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [successData, setSuccessData] = useState<any | null>(null);
+
+  // Auto-polling para validação do pagamento em tempo real
+  useEffect(() => {
+    if (checkoutStep !== 'payment' || !checkoutResult?.payment_id) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const check = await api.checkPublicPayment(checkoutResult.payment_id);
+        if (check.status === 'paid' && check.activated) {
+          clearInterval(interval);
+          handlePaymentApproved(check);
+        }
+      } catch (e) {
+        // silent check
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [checkoutStep, checkoutResult]);
+
+  function handleOpenCheckout(planId: number = 2) {
+    setSelectedPlanId(planId);
+    setCheckoutStep('form');
+    setFormError(null);
+    setIsCheckoutOpen(true);
+  }
+
+  function handleCloseCheckout() {
+    setIsCheckoutOpen(false);
+    setCheckoutStep('form');
+    setFormError(null);
+    setCheckoutResult(null);
+  }
+
+  async function handleStartPurchase(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+
+    if (!companyName.trim()) {
+      setFormError('Informe o nome da sua loja ou assistência.');
+      return;
+    }
+    if (!adminName.trim()) {
+      setFormError('Informe o nome do responsável.');
+      return;
+    }
+    if (!adminEmail.trim()) {
+      setFormError('Informe um e-mail válido para seu acesso.');
+      return;
+    }
+    if (adminPassword.length < 6) {
+      setFormError('A senha de acesso deve ter pelo menos 6 caracteres.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await api.createPublicCheckout({
+        company_name: companyName,
+        trade_name: companyName,
+        cnpj_cpf: cnpjCpf,
+        phone,
+        admin_name: adminName,
+        admin_email: adminEmail,
+        admin_password: adminPassword,
+        plan_id: selectedPlanId,
+        billing_cycle: billingCycle,
+        payment_method: paymentMethod
+      });
+
+      setCheckoutResult(res);
+      setCheckoutStep('payment');
+    } catch (err: any) {
+      setFormError(err.message || 'Erro ao processar compra. Verifique os dados e tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleCopyPix() {
+    if (!checkoutResult?.pix_copia_cola) return;
+    navigator.clipboard.writeText(checkoutResult.pix_copia_cola);
+    setCopiedPix(true);
+    setTimeout(() => setCopiedPix(false), 2500);
+  }
+
+  async function handleSimulateApproval() {
+    if (!checkoutResult?.payment_id) return;
+    setCheckingPayment(true);
+    try {
+      const res = await api.confirmPublicPayment(checkoutResult.payment_id);
+      if (res.status === 'paid' && res.activated) {
+        handlePaymentApproved(res);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Erro ao validar pagamento');
+    } finally {
+      setCheckingPayment(false);
+    }
+  }
+
+  function handlePaymentApproved(data: any) {
+    setSuccessData(data);
+    setCheckoutStep('success');
+    if (data.token && data.user) {
+      setAuthToken(data.token);
+      setSavedUser(data.user);
+    }
+  }
+
+  function handleEnterDashboard() {
+    if (onLoginSuccess) {
+      onLoginSuccess();
+    } else {
+      onGoToLogin();
+    }
+  }
 
   const toggleFaq = (index: number) => {
     setOpenFaq(openFaq === index ? null : index);
   };
+
+  const currentPlanPrice = selectedPlanId === 2 ? 79.90 : 49.90;
+  let finalCalculatedPrice = currentPlanPrice;
+  if (billingCycle === 'quarterly') finalCalculatedPrice = (currentPlanPrice * 3) * 0.95;
+  else if (billingCycle === 'annual') finalCalculatedPrice = (currentPlanPrice * 12) * 0.80;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white font-sans">
@@ -83,13 +238,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
               onClick={() => onGoToLogin()}
               className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white transition"
             >
-              Entrar
+              Já sou cliente (Entrar)
             </button>
             <button
-              onClick={() => onGoToLogin('Ouro')}
+              onClick={() => handleOpenCheckout(2)}
               className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-sm font-bold shadow-lg shadow-blue-600/25 hover:shadow-blue-600/40 transition-all flex items-center gap-2"
             >
-              <span>Testar Grátis 7 Dias</span>
+              <span>Comprar Plano</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -103,9 +258,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
         <div className="absolute top-1/3 left-1/3 w-[300px] h-[300px] bg-indigo-500/10 blur-[100px] rounded-full pointer-events-none" />
 
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center relative z-10">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-wider mb-6 animate-pulse">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-bold uppercase tracking-wider mb-6">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>Feito de Técnico para Técnicos • 100% em Nuvem</span>
+            <span>Feito de Técnico para Técnicos • Ativação Imediata</span>
           </div>
 
           <h1 className="text-4xl sm:text-5xl md:text-6xl font-black text-white tracking-tight leading-[1.15] mb-6">
@@ -116,22 +271,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
           </h1>
 
           <p className="text-lg sm:text-xl text-slate-300 max-w-3xl mx-auto leading-relaxed mb-10 font-normal">
-            Controle <strong className="text-white">Ordens de Serviço com fotos de entrada</strong>, Frente de Caixa (PDV), Estoque de Peças, Seminovos e <strong className="text-white">Emissão Fiscal SEFAZ (NF-e & NFS-e MEI)</strong> em uma única plataforma intuitiva, sem travamentos e com o menor custo do mercado.
+            Controle <strong className="text-white">Ordens de Serviço com fotos de entrada</strong>, Frente de Caixa (PDV), Estoque de Peças, Seminovos e <strong className="text-white">Emissão Fiscal SEFAZ (NF-e & NFS-e MEI)</strong> em uma única plataforma intuitiva, sem travamentos e com ativação instantânea no seu e-mail.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-12">
             <button
-              onClick={() => onGoToLogin('Ouro')}
+              onClick={() => handleOpenCheckout(2)}
               className="w-full sm:w-auto px-8 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-base shadow-xl shadow-blue-600/30 hover:shadow-blue-600/50 transition-all flex items-center justify-center gap-3 transform hover:-translate-y-0.5"
             >
-              <span>Começar Teste Grátis de 7 Dias</span>
+              <span>Comprar Agora com Ativação Imediata</span>
               <ArrowRight className="w-5 h-5" />
             </button>
             <a
               href="#telas"
               className="w-full sm:w-auto px-7 py-4 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 hover:text-white font-bold text-base border border-slate-800 hover:border-slate-700 transition flex items-center justify-center gap-2"
             >
-              <span>Ver Telas do Sistema</span>
+              <span>Ver Demonstração das Telas</span>
               <ChevronDown className="w-4 h-4" />
             </a>
           </div>
@@ -139,20 +294,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
           {/* Badges de Confiança */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 max-w-3xl mx-auto pt-6 border-t border-slate-800/80 text-xs font-semibold text-slate-400">
             <div className="flex items-center justify-center gap-2">
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span>Ativação Instantânea</span>
+            </div>
+            <div className="flex items-center justify-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Sem cartão no teste</span>
+              <span>Pagamento Seguro PIX</span>
             </div>
             <div className="flex items-center justify-center gap-2">
               <Laptop className="w-4 h-4 text-blue-400" />
               <span>PC, Tablet e Celular</span>
             </div>
             <div className="flex items-center justify-center gap-2">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span>Ativação Instantânea</span>
-            </div>
-            <div className="flex items-center justify-center gap-2">
               <Clock className="w-4 h-4 text-indigo-400" />
-              <span>100% Sem Fidelidade</span>
+              <span>Sem Fidelidade (Cancele quando quiser)</span>
             </div>
           </div>
         </div>
@@ -621,7 +776,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
               Simples e Rápido
             </span>
             <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight mt-2">
-              Comece a Usar em Menos de 2 Minutos
+              Como Funciona a Contratação
             </h2>
           </div>
 
@@ -630,9 +785,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
               <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-lg shadow-blue-600/30">
                 1
               </div>
-              <h3 className="text-base font-bold text-white">Crie Sua Conta Grátis</h3>
+              <h3 className="text-base font-bold text-white">Escolha Seu Plano</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Cadastre sua loja sem precisar cadastrar cartão de crédito. Seu acesso é liberado instantaneamente por 7 dias.
+                Selecione entre o Plano Prata (gestão completa sem nota) ou Plano Ouro (com emissor fiscal SEFAZ).
               </p>
             </div>
 
@@ -640,9 +795,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
               <div className="w-14 h-14 rounded-2xl bg-indigo-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-lg shadow-indigo-600/30">
                 2
               </div>
-              <h3 className="text-base font-bold text-white">Personalize com Sua Marca</h3>
+              <h3 className="text-base font-bold text-white">Pague com PIX Imediato</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Coloque o logotipo da sua assistência, dados do CNPJ, endereço e defina o termo de garantia oficial nos recibos.
+                Preencha os dados da sua loja e escaneie o QR Code PIX. O pagamento é aprovado em segundos pelo banco.
               </p>
             </div>
 
@@ -650,9 +805,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
               <div className="w-14 h-14 rounded-2xl bg-emerald-600 text-white font-black text-xl flex items-center justify-center mx-auto shadow-lg shadow-emerald-600/30">
                 3
               </div>
-              <h3 className="text-base font-bold text-white">Opere na Bancada</h3>
+              <h3 className="text-base font-bold text-white">Acesso Liberado & E-mail</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Abra ordens de serviço, realize vendas de balcão e acompanhe seu lucro diário sem planilhas ou papelada.
+                Assim que validado, você recebe a confirmação no e-mail e seu acesso entra em funcionamento na hora.
               </p>
             </div>
           </div>
@@ -664,13 +819,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
         <div className="text-center max-w-3xl mx-auto mb-16">
           <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-blue-500/10 text-blue-400 text-xs font-bold uppercase tracking-wider mb-3">
             <Clock className="w-3.5 h-3.5" />
-            <span>Planos 100% Mensais • Cancele Quando Quiser</span>
+            <span>Planos 100% Mensais • Sem Fidelidade</span>
           </div>
           <h2 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
             Preço Justo e Sem Surpresas
           </h2>
           <p className="text-slate-400 text-sm mt-3">
-            A única diferença entre os planos é a emissão de nota fiscal. Escolha o ideal para o momento da sua loja:
+            A única diferença entre os planos é a emissão de nota fiscal. Escolha o ideal e comece a usar agora:
           </p>
         </div>
 
@@ -737,10 +892,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
             </div>
 
             <button
-              onClick={() => onGoToLogin('Prata')}
+              onClick={() => handleOpenCheckout(1)}
               className="w-full py-3.5 px-6 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-extrabold text-xs shadow-md transition flex items-center justify-center gap-2"
             >
-              <span>Começar no Plano Prata</span>
+              <span>Comprar Plano Prata — R$ 49,90/mês</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -812,10 +967,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
             </div>
 
             <button
-              onClick={() => onGoToLogin('Ouro')}
+              onClick={() => handleOpenCheckout(2)}
               className="w-full py-4 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black text-xs shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 transition-all flex items-center justify-center gap-2"
             >
-              <span>Testar Plano Ouro Grátis por 7 Dias</span>
+              <span>Comprar Plano Ouro — R$ 79,90/mês</span>
               <ArrowRight className="w-4 h-4" />
             </button>
           </div>
@@ -837,12 +992,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
           <div className="space-y-3">
             {[
               {
-                q: 'Preciso instalar algum programa no meu computador?',
-                a: 'Não! O TechOS é 100% online e funciona direto pelo navegador de internet (Google Chrome, Edge, Safari). Você pode acessar do computador, notebook, tablet ou até do seu celular, com seus dados sempre sincronizados na nuvem.'
+                q: 'Como funciona a ativação do meu acesso?',
+                a: 'Após preencher os dados da sua loja e realizar o pagamento via PIX, o sistema identifica a aprovação automaticamente em segundos. Seu acesso começa a funcionar na mesma hora e você recebe uma confirmação completa por e-mail.'
               },
               {
-                q: 'Como funciona o teste grátis de 7 dias?',
-                a: 'Ao criar sua conta, você recebe 7 dias de acesso liberado com todas as funcionalidades para cadastrar sua loja, abrir ordens de serviço e testar na prática. Não solicitamos dados de cartão de crédito para iniciar o teste.'
+                q: 'Preciso instalar algum programa no meu computador?',
+                a: 'Não! O TechOS é 100% online e funciona direto pelo navegador de internet (Google Chrome, Edge, Safari). Você pode acessar do computador, notebook, tablet ou até do seu celular, com seus dados sempre sincronizados na nuvem.'
               },
               {
                 q: 'Existe contrato de fidelidade ou multa de cancelamento?',
@@ -895,14 +1050,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
             </p>
 
             <button
-              onClick={() => onGoToLogin('Ouro')}
+              onClick={() => handleOpenCheckout(2)}
               className="px-8 py-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm shadow-xl shadow-blue-600/40 transition-all flex items-center justify-center gap-2 mx-auto transform hover:-translate-y-0.5"
             >
-              <span>Experimentar Grátis por 7 Dias</span>
+              <span>Contratar Plano Agora</span>
               <ArrowRight className="w-4 h-4" />
             </button>
             <p className="text-[11px] text-slate-400 mt-4">
-              Sem cartão de crédito • Liberação imediata • Acesso total
+              Liberação imediata via PIX • Confirmação por e-mail • Sem fidelidade
             </p>
           </div>
         </div>
@@ -935,6 +1090,401 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin }) => {
           </div>
         </div>
       </footer>
+
+      {/* ==================================================== */}
+      {/* 10. MODAL DE CADASTRO E CHECKOUT DIRETO DE COMPRA */}
+      {/* ==================================================== */}
+      {isCheckoutOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl my-8">
+            {/* Botão Fechar */}
+            <button
+              onClick={handleCloseCheckout}
+              className="absolute top-6 right-6 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* ETAPA 1: FORMULÁRIO DE CADASTRO E SELEÇÃO DE PLANO */}
+            {checkoutStep === 'form' && (
+              <form onSubmit={handleStartPurchase} className="space-y-6">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 text-xs font-bold uppercase tracking-wider mb-2">
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>Contratação Direta do SaaS</span>
+                  </div>
+                  <h3 className="text-2xl font-black text-white">Assinar o TechOS</h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Preencha os dados da sua loja para gerar a fatura. A validação do pagamento libera seu acesso imediatamente.
+                  </p>
+                </div>
+
+                {formError && (
+                  <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-3 text-red-400 text-xs">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{formError}</span>
+                  </div>
+                )}
+
+                {/* Seletor de Plano */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                    Plano Desejado
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div
+                      onClick={() => setSelectedPlanId(1)}
+                      className={`p-4 rounded-xl border cursor-pointer transition ${
+                        selectedPlanId === 1
+                          ? 'bg-blue-950/50 border-blue-500 ring-2 ring-blue-500/40'
+                          : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-bold text-sm text-white">Plano Prata</span>
+                        <span className="text-xs font-bold text-blue-400 font-mono">R$ 49,90/mês</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">O.S. ilimitadas, PDV e estoque sem emissão fiscal.</p>
+                    </div>
+
+                    <div
+                      onClick={() => setSelectedPlanId(2)}
+                      className={`p-4 rounded-xl border cursor-pointer transition relative ${
+                        selectedPlanId === 2
+                          ? 'bg-amber-950/30 border-amber-500 ring-2 ring-amber-500/40'
+                          : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <span className="absolute -top-2.5 right-3 bg-amber-500 text-slate-950 text-[9px] font-black uppercase px-2 py-0.5 rounded-full">
+                        Com Nota Fiscal
+                      </span>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-bold text-sm text-amber-300">Plano Ouro</span>
+                        <span className="text-xs font-bold text-amber-400 font-mono">R$ 79,90/mês</span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">Tudo do Prata + NF-e SEFAZ e NFS-e MEI Nacional.</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dados da Loja */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Nome da Loja / Assistência *
+                    </label>
+                    <div className="relative">
+                      <Building className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        required
+                        value={companyName}
+                        onChange={(e) => setCompanyName(e.target.value)}
+                        placeholder="Ex: TechCell Assistência"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      CNPJ ou CPF (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={cnpjCpf}
+                      onChange={(e) => setCnpjCpf(e.target.value)}
+                      placeholder="00.000.000/0001-00"
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Nome do Responsável *
+                    </label>
+                    <div className="relative">
+                      <User className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        required
+                        value={adminName}
+                        onChange={(e) => setAdminName(e.target.value)}
+                        placeholder="Seu nome completo"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      WhatsApp / Celular com DDD *
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <input
+                        type="text"
+                        required
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="(11) 99999-8888"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      E-mail de Acesso (Seu Login) *
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <input
+                        type="email"
+                        required
+                        value={adminEmail}
+                        onChange={(e) => setAdminEmail(e.target.value)}
+                        placeholder="seu@email.com"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Senha de Acesso *
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                      <input
+                        type="password"
+                        required
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        placeholder="Mínimo 6 caracteres"
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-white text-xs placeholder-slate-600 focus:outline-none focus:border-blue-500 transition"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Forma de Pagamento */}
+                <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">Forma de Pagamento</span>
+                    <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                      <Zap className="w-3 h-3" />
+                      PIX: Liberação Automática em Segundos
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('PIX')}
+                      className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
+                        paymentMethod === 'PIX'
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      <QrCode className="w-4 h-4" />
+                      <span>PIX (Recomendado)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('Cartão de Crédito')}
+                      className={`p-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-2 transition ${
+                        paymentMethod === 'Cartão de Crédito'
+                          ? 'bg-blue-600 text-white border-blue-500 shadow-md'
+                          : 'bg-slate-900 text-slate-300 border-slate-800 hover:bg-slate-800'
+                      }`}
+                    >
+                      <CreditCard className="w-4 h-4" />
+                      <span>Cartão de Crédito</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Resumo do Pedido e Botão Submissão */}
+                <div className="pt-4 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <span className="text-xs text-slate-400">Total a pagar:</span>
+                    <div className="text-2xl font-black text-emerald-400 font-mono">
+                      R$ {finalCalculatedPrice.toFixed(2)}
+                      <span className="text-xs text-slate-400 font-normal"> / mês</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full sm:w-auto px-8 py-3.5 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-extrabold text-sm rounded-xl shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Processando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Prosseguir para Pagamento</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ETAPA 2: TELA DE PAGAMENTO PIX INSTANTÂNEO COM QR CODE */}
+            {checkoutStep === 'payment' && checkoutResult && (
+              <div className="space-y-6 text-center">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-bold uppercase tracking-wider mb-2">
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Pagamento Gerado • Aguardando Aprovação</span>
+                  </div>
+                  <h3 className="text-2xl font-black text-white">Efetue o Pagamento via PIX</h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Escaneie o QR Code abaixo no app do seu banco ou use a chave Copia e Cola.
+                  </p>
+                </div>
+
+                {/* Card do QR Code */}
+                <div className="p-6 bg-slate-950 border border-slate-800 rounded-2xl max-w-sm mx-auto flex flex-col items-center">
+                  <div className="w-52 h-52 bg-white rounded-xl p-3 flex items-center justify-center shadow-lg mb-4">
+                    {checkoutResult.pix_qrcode ? (
+                      <img
+                        src={`data:image/png;base64,${checkoutResult.pix_qrcode}`}
+                        alt="QR Code PIX"
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(checkoutResult.pix_copia_cola)}`}
+                        alt="QR Code PIX"
+                        className="w-full h-full object-contain"
+                      />
+                    )}
+                  </div>
+
+                  <div className="text-sm font-bold text-white mb-1">
+                    Valor a Pagar: <span className="text-emerald-400 font-mono text-lg">R$ {checkoutResult.amount.toFixed(2)}</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400">Favorecido: {checkoutResult.pix_receiver}</span>
+                </div>
+
+                {/* Copia e Cola */}
+                <div className="max-w-md mx-auto space-y-2 text-left">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Código PIX Copia e Cola:
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={checkoutResult.pix_copia_cola}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-slate-400 text-xs font-mono truncate select-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopyPix}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shrink-0 transition"
+                    >
+                      {copiedPix ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-300" />
+                          <span>Copiado!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>Copiar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Status Indicator com Spinner */}
+                <div className="p-4 bg-blue-950/40 border border-blue-800/40 rounded-xl max-w-md mx-auto flex items-center justify-between text-xs text-blue-300">
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-blue-400 animate-spin shrink-0" />
+                    <span>Aguardando confirmação bancária em tempo real...</span>
+                  </span>
+                </div>
+
+                {/* Botão de Validação Imediata (Simulação / Teste Rápido) */}
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleSimulateApproval}
+                    disabled={checkingPayment}
+                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold rounded-xl shadow-lg shadow-emerald-600/30 transition flex items-center gap-2"
+                  >
+                    {checkingPayment ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Validando Pagamento...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Já Efetuei o Pagamento (Confirmar Agora)</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCheckoutStep('form')}
+                    className="px-4 py-2.5 text-xs text-slate-400 hover:text-slate-200 transition"
+                  >
+                    Voltar e alterar dados
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ETAPA 3: PAGAMENTO APROVADO & ATIVAÇÃO IMEDIATA */}
+            {checkoutStep === 'success' && (
+              <div className="space-y-6 text-center py-4">
+                <div className="w-20 h-20 rounded-full bg-emerald-500/20 text-emerald-400 border-2 border-emerald-500/40 flex items-center justify-center mx-auto shadow-xl shadow-emerald-500/20">
+                  <CheckCircle2 className="w-10 h-10" />
+                </div>
+
+                <div className="space-y-2">
+                  <h3 className="text-3xl font-black text-white">Pagamento Confirmado com Sucesso!</h3>
+                  <p className="text-sm text-slate-300 max-w-md mx-auto">
+                    Seu acesso ao <strong className="text-white">TechOS ({successData?.plan_name || 'Plano Contratado'})</strong> foi ativado e está funcionando.
+                  </p>
+                </div>
+
+                {/* Alerta de Confirmação por E-mail */}
+                <div className="p-4 bg-emerald-950/40 border border-emerald-800/60 rounded-2xl max-w-md mx-auto text-left flex items-start gap-3 text-xs text-emerald-300">
+                  <Mail className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block text-white font-bold mb-0.5">Confirmação Enviada por E-mail</strong>
+                    Enviamos o recibo da assinatura e os dados de login para <span className="font-mono text-emerald-200 font-semibold">{successData?.email_to || adminEmail}</span>.
+                  </div>
+                </div>
+
+                <div className="pt-4">
+                  <button
+                    type="button"
+                    onClick={handleEnterDashboard}
+                    className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-sm rounded-xl shadow-xl shadow-blue-600/40 transition-all flex items-center justify-center gap-2 mx-auto transform hover:-translate-y-0.5"
+                  >
+                    <span>Acessar Meu Painel Agora</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

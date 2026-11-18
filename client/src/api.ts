@@ -61,6 +61,10 @@ export const api = {
   me: () => request('/auth/me'),
 
   // Store Subscription & Renewal
+  getPublicPlans: () => request('/subscription/public-plans'),
+  createPublicCheckout: (data: any) => request('/subscription/public-checkout', { method: 'POST', body: JSON.stringify(data) }),
+  checkPublicPayment: (paymentId: number | string) => request(`/subscription/public-check-payment/${paymentId}`),
+  confirmPublicPayment: (paymentId: number | string) => request(`/subscription/public-confirm-payment/${paymentId}`, { method: 'POST' }),
   getSubscriptionCurrent: () => request('/subscription/current'),
   getCurrentSubscription: () => request('/subscription/current'),
   getSubscriptionPlans: () => request('/subscription/plans'),

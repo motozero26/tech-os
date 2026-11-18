@@ -56,10 +56,8 @@ export const App: React.FC = () => {
     }
     return (
       <LandingPage
-        onGoToLogin={(plan) => {
-          setSelectedPlanForRegistration(plan || null);
-          setAuthView('login');
-        }}
+        onGoToLogin={() => setAuthView('login')}
+        onLoginSuccess={() => setToken(getAuthToken())}
       />
     );
   }

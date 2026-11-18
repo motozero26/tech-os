@@ -48,7 +48,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, s
           <div className="mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-950/80 to-indigo-950/80 border border-blue-500/30 flex items-center gap-2.5 text-xs text-blue-300">
             <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
             <div>
-              Plano Selecionado: <strong className="text-white">{selectedPlan}</strong> (7 dias de teste grátis liberados)
+              Plano Selecionado: <strong className="text-white">{selectedPlan}</strong> — Efetue login para acessar seu painel.
             </div>
           </div>
         )}

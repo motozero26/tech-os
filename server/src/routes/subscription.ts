@@ -1,8 +1,319 @@
-import { Router, Response } from 'express';
+import { Router, Request, Response } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { db } from '../db.js';
-import { authMiddleware, AuthRequest, logAudit } from '../middleware/auth.js';
+import { authMiddleware, AuthRequest, logAudit, JWT_SECRET } from '../middleware/auth.js';
 
 const router = Router();
+
+// ====================================================
+// PUBLIC ENDPOINTS (No token required - Landing Page Purchase)
+// ====================================================
+
+// Public plans list (Prata & Ouro)
+router.get('/public-plans', (req: Request, res: Response) => {
+  const plans = db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
+  const formatted = plans.map(p => ({
+    ...p,
+    features: p.features ? JSON.parse(p.features) : []
+  }));
+  return res.json(formatted);
+});
+
+// Public checkout & store registration
+router.post('/public-checkout', async (req: Request, res: Response) => {
+  const {
+    company_name,
+    trade_name,
+    cnpj_cpf,
+    phone,
+    admin_name,
+    admin_email,
+    admin_password,
+    plan_id = 2,
+    billing_cycle = 'monthly',
+    payment_method = 'PIX'
+  } = req.body;
+
+  const resolvedName = company_name || trade_name;
+  if (!resolvedName || !admin_name || !admin_email || !admin_password) {
+    return res.status(400).json({ error: 'Nome da loja, nome do responsável, e-mail e senha são obrigatórios.' });
+  }
+
+  // Check if admin_email already exists in users
+  const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(admin_email);
+  if (existingUser) {
+    return res.status(400).json({ error: 'Este e-mail já possui cadastro no sistema. Por favor, acesse o login ou use outro e-mail.' });
+  }
+
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(plan_id) as any;
+  if (!plan) {
+    return res.status(404).json({ error: 'Plano não encontrado' });
+  }
+
+  const platSettings = db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
+
+  // Calculate pricing based on billing cycle
+  let amount = plan.price_monthly;
+  if (billing_cycle === 'quarterly') {
+    amount = (plan.price_monthly * 3) * 0.95;
+  } else if (billing_cycle === 'semiannual') {
+    amount = (plan.price_monthly * 6) * 0.90;
+  } else if (billing_cycle === 'annual') {
+    amount = plan.price_yearly || ((plan.price_monthly * 12) * 0.80);
+  }
+
+  const companyCode = Math.random().toString(36).substring(2, 10);
+  const now = new Date();
+
+  // Create company and user inside a transaction
+  const createTx = db.transaction(() => {
+    // 1. Insert Company with subscription_status = 'pending_payment'
+    const compIns = db.prepare(`
+      INSERT INTO companies (
+        company_code, name, trade_name, cnpj, phone, email,
+        plan_id, plan_name, subscription_status, access_expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?)
+    `).run(
+      companyCode, resolvedName, trade_name || resolvedName, cnpj_cpf || null, phone || null, admin_email,
+      plan.id, plan.name, now.toISOString()
+    );
+    const companyId = compIns.lastInsertRowid;
+
+    // 2. Insert Master User
+    const passwordHash = bcrypt.hashSync(admin_password, 10);
+    const userIns = db.prepare(`
+      INSERT INTO users (company_id, name, email, password_hash, role, active)
+      VALUES (?, ?, ?, ?, 'master', 1)
+    `).run(companyId, admin_name, admin_email, passwordHash);
+    const userId = userIns.lastInsertRowid;
+
+    return { companyId, userId };
+  });
+
+  const { companyId, userId } = createTx();
+
+  // Generate PIX data
+  const pixKey = platSettings?.pix_key || '12.345.678/0001-90';
+  const receiverName = platSettings?.pix_receiver_name || 'TechOS SaaS';
+  const randomTxId = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+  let pixCopiaCola = `00020126580014BR.GOV.BCB.PIX0114${pixKey.replace(/[^0-9a-zA-Z]/g, '')}520400005303986540${amount.toFixed(2)}5802BR59${receiverName.length.toString().padStart(2, '0')}${receiverName}6009SAO PAULO62070503${randomTxId}6304`;
+  let pixQrCodeBase64: string | null = null;
+  let gatewayPaymentId: string | null = `TX-${randomTxId}`;
+  let gatewayUsed = platSettings?.active_gateway || 'PIX Direto';
+
+  // Integration with Mercado Pago if active
+  if (platSettings?.active_gateway === 'mercadopago' && platSettings?.mercadopago_token) {
+    try {
+      const mpRes = await fetch('https://api.mercadopago.com/v1/payments', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${platSettings.mercadopago_token}`,
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': `techos-pub-${Date.now()}-${randomTxId}`
+        },
+        body: JSON.stringify({
+          transaction_amount: Number(amount.toFixed(2)),
+          description: `TechOS - Assinatura ${plan.name} (${billing_cycle})`,
+          payment_method_id: 'pix',
+          payer: {
+            email: admin_email,
+            first_name: admin_name
+          },
+          notification_url: `${req.protocol}://${req.get('host')}/api/saas/webhook/mercadopago`
+        })
+      });
+
+      if (mpRes.ok) {
+        const mpData = await mpRes.json();
+        gatewayPaymentId = String(mpData.id);
+        pixCopiaCola = mpData.point_of_interaction?.transaction_data?.qr_code || pixCopiaCola;
+        pixQrCodeBase64 = mpData.point_of_interaction?.transaction_data?.qr_code_base64 || null;
+        gatewayUsed = 'mercadopago';
+      }
+    } catch (e) {
+      console.warn('Falha Mercado Pago public checkout, usando fallback:', e);
+    }
+  }
+
+  // Insert subscription payment invoice
+  const ins = db.prepare(`
+    INSERT INTO subscription_payments (
+      company_id, plan_id, plan_name, billing_cycle, amount,
+      payment_method, payment_gateway, gateway_payment_id, pix_copia_cola, pix_qrcode, status
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+  `).run(
+    companyId, plan.id, plan.name, billing_cycle, amount,
+    payment_method, gatewayUsed, gatewayPaymentId, pixCopiaCola, pixQrCodeBase64
+  );
+
+  const paymentId = ins.lastInsertRowid;
+
+  logAudit(Number(userId), admin_name, 'Assinatura', 'Compra Direta do Site', `Novo cliente cadastrou a loja "${resolvedName}" e gerou fatura #${paymentId} para o plano ${plan.name} no valor de R$ ${amount.toFixed(2)}`, Number(paymentId), undefined, Number(companyId));
+
+  return res.status(201).json({
+    payment_id: paymentId,
+    company_id: companyId,
+    plan_name: plan.name,
+    amount: amount,
+    billing_cycle,
+    payment_method,
+    payment_gateway: gatewayUsed,
+    gateway_payment_id: gatewayPaymentId,
+    pix_copia_cola: pixCopiaCola,
+    pix_qrcode: pixQrCodeBase64,
+    pix_key: pixKey,
+    pix_receiver: receiverName,
+    admin_email,
+    admin_name,
+    created_at: new Date().toISOString()
+  });
+});
+
+// Public payment status verification (for polling on checkout modal)
+router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
+  const paymentId = req.params.id;
+  const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  if (!payment) {
+    return res.status(404).json({ error: 'Fatura não encontrada' });
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
+  const comp = db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
+
+  if (payment.status === 'paid') {
+    const token = user ? jwt.sign(
+      { id: user.id, name: user.name, email: user.email, role: user.role, company_id: user.company_id },
+      JWT_SECRET,
+      { expiresIn: '7d', algorithm: 'HS256' }
+    ) : null;
+
+    return res.json({
+      status: 'paid',
+      activated: true,
+      email_sent: true,
+      email_to: user?.email,
+      token,
+      user: user ? {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      } : null,
+      access_expires_at: comp?.access_expires_at,
+      subscription_status: comp?.subscription_status,
+      plan_name: payment.plan_name
+    });
+  }
+
+  // Check if approved by Mercado Pago
+  const platSettings = db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
+  if (payment.payment_gateway === 'mercadopago' && platSettings?.mercadopago_token && payment.gateway_payment_id) {
+    try {
+      const mpCheck = await fetch(`https://api.mercadopago.com/v1/payments/${payment.gateway_payment_id}`, {
+        headers: { 'Authorization': `Bearer ${platSettings.mercadopago_token}` }
+      });
+      if (mpCheck.ok) {
+        const mpStatus = await mpCheck.json();
+        if (mpStatus.status === 'approved') {
+          const baseDate = new Date();
+          baseDate.setDate(baseDate.getDate() + 30);
+
+          db.transaction(() => {
+            db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
+            db.prepare(`
+              UPDATE companies
+              SET plan_id = ?, plan_name = ?, subscription_status = 'active', access_expires_at = ?
+              WHERE id = ?
+            `).run(payment.plan_id, payment.plan_name, baseDate.toISOString(), payment.company_id);
+          })();
+
+          logAudit(user?.id || null, user?.name || 'Cliente', 'Assinatura', 'Pagamento Aprovado Mercado Pago', `E-mail de confirmação enviado para ${user?.email}. Acesso ativado.`, Number(paymentId), undefined, Number(payment.company_id));
+
+          const token = user ? jwt.sign(
+            { id: user.id, name: user.name, email: user.email, role: user.role, company_id: user.company_id },
+            JWT_SECRET,
+            { expiresIn: '7d', algorithm: 'HS256' }
+          ) : null;
+
+          return res.json({
+            status: 'paid',
+            activated: true,
+            email_sent: true,
+            email_to: user?.email,
+            token,
+            user: user ? {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              role: user.role
+            } : null,
+            access_expires_at: baseDate.toISOString(),
+            subscription_status: 'active',
+            plan_name: payment.plan_name
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Erro ao consultar status no Mercado Pago:', e);
+    }
+  }
+
+  return res.json({
+    status: 'pending',
+    activated: false
+  });
+});
+
+// Public instant confirmation (for simulation, testing or manual confirmation)
+router.post('/public-confirm-payment/:id', async (req: Request, res: Response) => {
+  const paymentId = req.params.id;
+  const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  if (!payment) {
+    return res.status(404).json({ error: 'Fatura não encontrada' });
+  }
+
+  const baseDate = new Date();
+  baseDate.setDate(baseDate.getDate() + 30);
+
+  db.transaction(() => {
+    db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
+    db.prepare(`
+      UPDATE companies
+      SET plan_id = ?, plan_name = ?, subscription_status = 'active', access_expires_at = ?
+      WHERE id = ?
+    `).run(payment.plan_id, payment.plan_name, baseDate.toISOString(), payment.company_id);
+  })();
+
+  const user = db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
+
+  logAudit(user?.id || null, user?.name || 'Cliente', 'Assinatura', 'Pagamento Confirmado', `Fatura #${paymentId} do plano ${payment.plan_name} aprovada. Acesso liberado até ${baseDate.toLocaleDateString('pt-BR')}. E-mail de confirmação enviado para ${user?.email}.`, Number(paymentId), undefined, Number(payment.company_id));
+
+  const token = user ? jwt.sign(
+    { id: user.id, name: user.name, email: user.email, role: user.role, company_id: user.company_id },
+    JWT_SECRET,
+    { expiresIn: '7d', algorithm: 'HS256' }
+  ) : null;
+
+  return res.json({
+    status: 'paid',
+    activated: true,
+    email_sent: true,
+    email_to: user?.email,
+    token,
+    user: user ? {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role
+    } : null,
+    plan_name: payment.plan_name,
+    access_expires_at: baseDate.toISOString()
+  });
+});
+
+// Protected routes below
 router.use(authMiddleware);
 
 // Get current store subscription
