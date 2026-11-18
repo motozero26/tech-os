@@ -7,35 +7,36 @@ router.use(authMiddleware);
 
 // Financial summary
 router.get('/summary', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { period = 'month', start_date, end_date } = req.query;
 
   // Total sales revenue
   const salesRev = db.prepare(`
     SELECT COALESCE(SUM(final_amount), 0) as total
     FROM sales
-    WHERE status = 'completed'
-  `).get() as { total: number };
+    WHERE status = 'completed' AND company_id = ?
+  `).get(companyId) as { total: number };
 
   // Total OS revenue
   const osRev = db.prepare(`
     SELECT COALESCE(SUM(total_amount - discount), 0) as total
     FROM service_orders
-    WHERE status IN ('Finalizada', 'Pronta')
-  `).get() as { total: number };
+    WHERE status IN ('Finalizada', 'Pronta') AND company_id = ?
+  `).get(companyId) as { total: number };
 
   // Total expenses paid
   const expensesPaid = db.prepare(`
     SELECT COALESCE(SUM(amount), 0) as total
     FROM expenses
-    WHERE status = 'paid'
-  `).get() as { total: number };
+    WHERE status = 'paid' AND company_id = ?
+  `).get(companyId) as { total: number };
 
   // Total expenses pending
   const expensesPending = db.prepare(`
     SELECT COALESCE(SUM(amount), 0) as total
     FROM expenses
-    WHERE status = 'pending'
-  `).get() as { total: number };
+    WHERE status = 'pending' AND company_id = ?
+  `).get(companyId) as { total: number };
 
   const totalRevenue = salesRev.total + osRev.total;
   const netProfit = totalRevenue - expensesPaid.total;
@@ -52,10 +53,11 @@ router.get('/summary', (req: AuthRequest, res: Response) => {
 
 // Expenses
 router.get('/expenses', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { status, category } = req.query;
 
-  let whereClauses: string[] = [];
-  let params: any[] = [];
+  let whereClauses: string[] = ['company_id = ?'];
+  let params: any[] = [companyId];
 
   if (status) {
     whereClauses.push('status = ?');
@@ -67,13 +69,14 @@ router.get('/expenses', (req: AuthRequest, res: Response) => {
     params.push(category);
   }
 
-  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
   const expenses = db.prepare(`SELECT * FROM expenses ${whereSql} ORDER BY due_date ASC`).all(...params);
 
   return res.json(expenses);
 });
 
 router.post('/expenses', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { description, category, due_date, amount, payment_method, status = 'pending', notes } = req.body;
 
   if (!description || !amount || !due_date) {
@@ -83,34 +86,41 @@ router.post('/expenses', (req: AuthRequest, res: Response) => {
   const numAmount = Number(amount);
 
   const ins = db.prepare(`
-    INSERT INTO expenses (description, category, due_date, amount, payment_method, status, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(description, category || 'Geral', due_date, numAmount, payment_method || null, status, notes || null);
+    INSERT INTO expenses (company_id, description, category, due_date, amount, payment_method, status, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(companyId, description, category || 'Geral', due_date, numAmount, payment_method || null, status, notes || null);
 
-  logAudit(req.user!.id, req.user!.name, 'Financeiro', 'Cadastro de Despesa', `Cadastrou a despesa "${description}" no valor de R$ ${numAmount.toFixed(2)}`, Number(ins.lastInsertRowid));
+  logAudit(req.user!.id, req.user!.name, 'Financeiro', 'Cadastro de Despesa', `Cadastrou a despesa "${description}" no valor de R$ ${numAmount.toFixed(2)}`, Number(ins.lastInsertRowid), undefined, companyId);
 
   return res.status(201).json({ id: ins.lastInsertRowid });
 });
 
 router.patch('/expenses/:id/pay', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { payment_method = 'Dinheiro' } = req.body;
 
-  db.prepare(`
+  const result = db.prepare(`
     UPDATE expenses
     SET status = 'paid', payment_date = CURRENT_TIMESTAMP, payment_method = ?
-    WHERE id = ?
-  `).run(payment_method, req.params.id);
+    WHERE id = ? AND company_id = ?
+  `).run(payment_method, req.params.id, companyId);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: 'Despesa não encontrada ou não pertence a esta empresa.' });
+  }
 
   return res.json({ success: true });
 });
 
 // Card rates
 router.get('/rates', (req: AuthRequest, res: Response) => {
-  const rates = db.prepare('SELECT * FROM card_rates ORDER BY card_type ASC, installments ASC').all();
+  const companyId = req.user?.company_id || 1;
+  const rates = db.prepare('SELECT * FROM card_rates WHERE company_id = ? ORDER BY card_type ASC, installments ASC').all(companyId);
   return res.json(rates);
 });
 
 router.post('/rates', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { rates } = req.body; // array of { card_type, installments, rate_percent }
 
   if (!Array.isArray(rates)) {
@@ -118,9 +128,9 @@ router.post('/rates', (req: AuthRequest, res: Response) => {
   }
 
   const saveRatesTx = db.transaction(() => {
-    db.prepare('DELETE FROM card_rates').run();
-    const insert = db.prepare('INSERT INTO card_rates (card_type, installments, rate_percent) VALUES (?, ?, ?)');
-    rates.forEach(r => insert.run(r.card_type, Number(r.installments), Number(r.rate_percent)));
+    db.prepare('DELETE FROM card_rates WHERE company_id = ?').run(companyId);
+    const insert = db.prepare('INSERT INTO card_rates (company_id, card_type, installments, rate_percent) VALUES (?, ?, ?, ?)');
+    rates.forEach(r => insert.run(companyId, r.card_type, Number(r.installments), Number(r.rate_percent)));
   });
 
   saveRatesTx();
@@ -129,14 +139,15 @@ router.post('/rates', (req: AuthRequest, res: Response) => {
 
 // Technician commissions
 router.get('/commissions', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const technicians = db.prepare(`
     SELECT u.id, u.name, u.commission_rate,
            COALESCE(SUM(soi.total_price), 0) as services_total,
            COALESCE(SUM(soi.total_price * (u.commission_rate / 100)), 0) as commission_amount
     FROM users u
     LEFT JOIN service_order_items soi ON soi.technician_id = u.id AND soi.item_type = 'service'
-    LEFT JOIN service_orders so ON so.id = soi.os_id AND so.status IN ('Finalizada', 'Pronta')
-    WHERE u.role IN ('technician', 'master')
+    LEFT JOIN service_orders so ON so.id = soi.os_id AND so.status IN ('Finalizada', 'Pronta') AND so.company_id = u.company_id
+    WHERE u.role IN ('technician', 'master') AND u.company_id = ?
     GROUP BY u.id
   `).all();
 

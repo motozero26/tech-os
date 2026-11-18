@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import { db } from '../db.js';
-import { authMiddleware, AuthRequest, logAudit } from '../middleware/auth.js';
+import { authMiddleware, AuthRequest, logAudit, requireSuperAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
@@ -10,7 +10,12 @@ const router = Router();
 // Restores access immediately upon payment confirmation
 // ----------------------------------------------------
 function processSubscriptionApproval(paymentRef: string | number, source: string) {
-  const existing = db.prepare('SELECT * FROM subscription_payments WHERE id = ? OR gateway_payment_id = ?').get(paymentRef, paymentRef) as any;
+  // Prioritize matching by secure gateway payment ID to prevent sequential ID guessing
+  let existing = db.prepare('SELECT * FROM subscription_payments WHERE gateway_payment_id = ?').get(String(paymentRef)) as any;
+  if (!existing) {
+    existing = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(Number(paymentRef)) as any;
+  }
+
   if (existing && existing.status !== 'paid') {
     const baseDate = new Date();
     let daysToAdd = 30;
@@ -29,7 +34,7 @@ function processSubscriptionApproval(paymentRef: string | number, source: string
       `).run(existing.plan_id, existing.plan_name, baseDate.toISOString(), existing.company_id);
     })();
 
-    logAudit(null, 'Webhook Gateway', 'Assinatura', `Acesso restaurado automaticamente via webhook [${source}]`, `Loja ID ${existing.company_id} renovada até ${baseDate.toLocaleDateString('pt-BR')}`, Number(existing.id));
+    logAudit(null, 'Webhook Gateway', 'Assinatura', `Acesso restaurado automaticamente via webhook [${source}]`, `Loja ID ${existing.company_id} renovada até ${baseDate.toLocaleDateString('pt-BR')}`, Number(existing.id), undefined, existing.company_id);
     return true;
   }
   return false;
@@ -67,6 +72,7 @@ router.post('/webhook/infinitepay', (req: Request, res: Response) => {
 
 // All subsequent routes require superadmin/master authentication
 router.use(authMiddleware);
+router.use(requireSuperAdmin);
 
 // SaaS Dashboard KPIs
 router.get('/stats', (req: AuthRequest, res: Response) => {

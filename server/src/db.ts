@@ -657,7 +657,7 @@ function seedDefaultData() {
   }
 
   // Ensure multi-tenant company_id exists on related tables
-  const tablesForCompanyId = ['users', 'service_orders', 'sales', 'cash_sessions', 'products', 'customers'];
+  const tablesForCompanyId = ['users', 'service_orders', 'sales', 'cash_sessions', 'products', 'customers', 'audit_logs', 'expenses', 'card_rates', 'used_device_trades'];
   for (const tbl of tablesForCompanyId) {
     try {
       db.prepare(`ALTER TABLE ${tbl} ADD COLUMN company_id INTEGER DEFAULT 1`).run();

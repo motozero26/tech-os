@@ -7,6 +7,7 @@ router.use(authMiddleware);
 
 // Hub counters
 router.get('/hub-counts', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const counts = db.prepare(`
     SELECT
       COUNT(*) as total,
@@ -16,25 +17,28 @@ router.get('/hub-counts', (req: AuthRequest, res: Response) => {
       COUNT(CASE WHEN status IN ('Finalizada', 'Finalizada sem reparo', 'Devolver na garantia') THEN 1 END) as finished,
       COUNT(CASE WHEN status = 'Laudo técnico' THEN 1 END) as report
     FROM service_orders
-  `).get();
+    WHERE company_id = ?
+  `).get(companyId);
 
   return res.json(counts);
 });
 
 // Next code
 router.get('/next-code', (req: AuthRequest, res: Response) => {
-  const lastCode = db.prepare('SELECT MAX(code) as max_code FROM service_orders').get() as { max_code: number | null };
+  const companyId = req.user?.company_id || 1;
+  const lastCode = db.prepare('SELECT MAX(code) as max_code FROM service_orders WHERE company_id = ?').get(companyId) as { max_code: number | null };
   const nextCode = (lastCode?.max_code || 0) + 1;
   return res.json({ nextCode });
 });
 
 // List OS with filters
 router.get('/', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { group = 'all', status_code, q, page = 1, limit = 50 } = req.query;
   const offset = (Number(page) - 1) * Number(limit);
 
-  let whereClauses: string[] = [];
-  let params: any[] = [];
+  let whereClauses: string[] = ['so.company_id = ?'];
+  let params: any[] = [companyId];
 
   if (group === 'evaluation') {
     whereClauses.push("so.status IN ('Aguardando avaliação', 'Aguardando orçamento')");
@@ -66,7 +70,7 @@ router.get('/', (req: AuthRequest, res: Response) => {
     params.push(searchPattern, searchPattern, searchPattern, searchPattern, searchPattern, searchPattern);
   }
 
-  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
 
   const totalCount = db.prepare(`
     SELECT COUNT(*) as count
@@ -100,6 +104,7 @@ router.get('/', (req: AuthRequest, res: Response) => {
 
 // Create new OS
 router.post('/create', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const {
     customer_id, customer_name, customer_phone, customer_cpf,
     device_id, device_brand, device_model, device_imei, device_color, device_password,
@@ -116,9 +121,9 @@ router.post('/create', (req: AuthRequest, res: Response) => {
         throw new Error('Nome do cliente é obrigatório');
       }
       const newCust = db.prepare(`
-        INSERT INTO customers (name, phone, cpf_cnpj)
-        VALUES (?, ?, ?)
-      `).run(customer_name, customer_phone || null, customer_cpf || null);
+        INSERT INTO customers (company_id, name, phone, cpf_cnpj)
+        VALUES (?, ?, ?, ?)
+      `).run(companyId, customer_name, customer_phone || null, customer_cpf || null);
       resolvedCustomerId = newCust.lastInsertRowid;
     }
 
@@ -139,8 +144,8 @@ router.post('/create', (req: AuthRequest, res: Response) => {
       resolvedDeviceId = newDev.lastInsertRowid;
     }
 
-    // 3. Sequential code
-    const lastCode = db.prepare('SELECT MAX(code) as max_code FROM service_orders').get() as { max_code: number | null };
+    // 3. Sequential code scoped by company
+    const lastCode = db.prepare('SELECT MAX(code) as max_code FROM service_orders WHERE company_id = ?').get(companyId) as { max_code: number | null };
     const code = (lastCode?.max_code || 0) + 1;
 
     // 4. Insert OS
@@ -149,18 +154,18 @@ router.post('/create', (req: AuthRequest, res: Response) => {
 
     const osInsert = db.prepare(`
       INSERT INTO service_orders (
-        code, customer_id, device_id, status, reported_defects,
+        company_id, code, customer_id, device_id, status, reported_defects,
         entry_notes, entry_photos, technical_report, internal_notes, deadline_date,
         advance_payment, advance_payment_method, warranty_period, warranty_unit,
         total_services, total_parts, discount, total_amount, technician_id, attendant_id
       ) VALUES (
-        ?, ?, ?, 'Aguardando avaliação', ?,
+        ?, ?, ?, ?, 'Aguardando avaliação', ?,
         ?, ?, ?, ?, ?,
         ?, ?, ?, ?,
         0, 0, 0, 0, ?, ?
       )
     `).run(
-      code, resolvedCustomerId, resolvedDeviceId || null, reported_defects || null,
+      companyId, code, resolvedCustomerId, resolvedDeviceId || null, reported_defects || null,
       entry_notes || null, photosJson, technical_report || null, internal_notes || null, deadline_date || null,
       advVal, advVal > 0 ? advance_payment_method : null, warranty_period, warranty_unit,
       technician_id || null, req.user!.id
@@ -188,7 +193,7 @@ router.post('/create', (req: AuthRequest, res: Response) => {
 
     // 6. Record Advance Payment in Cash Register if any
     if (advVal > 0) {
-      const openSession = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+      const openSession = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' AND company_id = ? ORDER BY id DESC LIMIT 1").get(companyId) as { id: number } | undefined;
       if (!openSession) {
         throw new Error('Não é possível receber adiantamento com o caixa fechado. Abra o caixa primeiro.');
       }
@@ -207,7 +212,7 @@ router.post('/create', (req: AuthRequest, res: Response) => {
       VALUES (?, ?, ?, NULL, 'Aguardando avaliação', 'Abertura da O.S.')
     `).run(osId, req.user!.id, req.user!.name);
 
-    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Criação', `Criou a O.S. #${code} para o cliente ID ${resolvedCustomerId}`, Number(osId));
+    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Criação', `Criou a O.S. #${code} para o cliente ID ${resolvedCustomerId}`, Number(osId), undefined, companyId);
 
     return { id: osId, code };
   });
@@ -222,6 +227,7 @@ router.post('/create', (req: AuthRequest, res: Response) => {
 
 // Get OS details
 router.get('/:id', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osId = req.params.id;
 
   const os = db.prepare(`
@@ -238,11 +244,11 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
     LEFT JOIN customer_devices cd ON cd.id = so.device_id
     LEFT JOIN users u ON u.id = so.technician_id
     LEFT JOIN users att ON att.id = so.attendant_id
-    WHERE so.id = ?
-  `).get(osId) as any;
+    WHERE so.id = ? AND so.company_id = ?
+  `).get(osId, companyId) as any;
 
   if (!os) {
-    return res.status(404).json({ error: 'Ordem de serviço não encontrada' });
+    return res.status(404).json({ error: 'Ordem de serviço não encontrada ou não pertence a esta empresa.' });
   }
 
   if (os.entry_photos) {
@@ -271,7 +277,7 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
     SELECT * FROM service_order_history WHERE os_id = ? ORDER BY id DESC
   `).all(osId);
 
-  const company = db.prepare('SELECT * FROM companies LIMIT 1').get();
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(os.company_id || companyId);
 
   return res.json({
     os,
@@ -284,6 +290,7 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
 
 // Update/Add entry photos to OS
 router.post('/:id/photos', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osId = req.params.id;
   const { photos } = req.body;
 
@@ -291,20 +298,26 @@ router.post('/:id/photos', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Formato inválido. "photos" deve ser uma lista de imagens.' });
   }
 
+  const os = db.prepare('SELECT id FROM service_orders WHERE id = ? AND company_id = ?').get(osId, companyId);
+  if (!os) {
+    return res.status(404).json({ error: 'Ordem de serviço não encontrada ou não pertence a esta empresa.' });
+  }
+
   const photosJson = JSON.stringify(photos);
   db.prepare(`
     UPDATE service_orders
     SET entry_photos = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(photosJson, osId);
+    WHERE id = ? AND company_id = ?
+  `).run(photosJson, osId, companyId);
 
-  logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Atualização', `Atualizou as fotos de entrada da O.S. ID ${osId}`, Number(osId));
+  logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Atualização', `Atualizou as fotos de entrada da O.S. ID ${osId}`, Number(osId), undefined, companyId);
 
   return res.json({ success: true, photos });
 });
 
 // Update OS Status
 router.patch('/:id/status', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osId = req.params.id;
   const { status, notes } = req.body;
 
@@ -312,9 +325,9 @@ router.patch('/:id/status', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Status é obrigatório' });
   }
 
-  const currentOs = db.prepare('SELECT id, code, status FROM service_orders WHERE id = ?').get(osId) as any;
+  const currentOs = db.prepare('SELECT id, code, status FROM service_orders WHERE id = ? AND company_id = ?').get(osId, companyId) as any;
   if (!currentOs) {
-    return res.status(404).json({ error: 'O.S. não encontrada' });
+    return res.status(404).json({ error: 'O.S. não encontrada ou não pertence a esta empresa.' });
   }
 
   const fromStatus = currentOs.status;
@@ -328,15 +341,15 @@ router.patch('/:id/status', (req: AuthRequest, res: Response) => {
     db.prepare(`
       UPDATE service_orders
       SET status = ?, updated_at = CURRENT_TIMESTAMP ${exitDateSql}
-      WHERE id = ?
-    `).run(status, osId);
+      WHERE id = ? AND company_id = ?
+    `).run(status, osId, companyId);
 
     db.prepare(`
       INSERT INTO service_order_history (os_id, user_id, user_name, from_status, to_status, notes)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(osId, req.user!.id, req.user!.name, fromStatus, status, notes || `Status alterado de ${fromStatus} para ${status}`);
 
-    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Alteração de Status', `O.S. #${currentOs.code} alterada de ${fromStatus} para ${status}`, Number(osId));
+    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Alteração de Status', `O.S. #${currentOs.code} alterada de ${fromStatus} para ${status}`, Number(osId), undefined, companyId);
   });
 
   updateTx();
@@ -345,6 +358,7 @@ router.patch('/:id/status', (req: AuthRequest, res: Response) => {
 
 // Add Item (Part or Service)
 router.post('/:id/items', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osId = req.params.id;
   const { item_type, product_id, service_id, description, unit_price, quantity = 1, warranty_period = 90, warranty_unit = 'Dias', technician_id } = req.body;
 
@@ -352,9 +366,9 @@ router.post('/:id/items', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Descrição e preço unitário são obrigatórios' });
   }
 
-  const os = db.prepare('SELECT id, code FROM service_orders WHERE id = ?').get(osId) as any;
+  const os = db.prepare('SELECT id, code FROM service_orders WHERE id = ? AND company_id = ?').get(osId, companyId) as any;
   if (!os) {
-    return res.status(404).json({ error: 'O.S. não encontrada' });
+    return res.status(404).json({ error: 'O.S. não encontrada ou não pertence a esta empresa.' });
   }
 
   const numQty = Number(quantity) || 1;
@@ -364,9 +378,9 @@ router.post('/:id/items', (req: AuthRequest, res: Response) => {
   const addItemTx = db.transaction(() => {
     // If it's a part linked to inventory product, check stock and deduct
     if (item_type === 'part' && product_id) {
-      const prod = db.prepare('SELECT stock_quantity, name FROM products WHERE id = ?').get(product_id) as any;
+      const prod = db.prepare('SELECT stock_quantity, name FROM products WHERE id = ? AND company_id = ?').get(product_id, companyId) as any;
       if (prod) {
-        db.prepare('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?').run(numQty, product_id);
+        db.prepare('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ? AND company_id = ?').run(numQty, product_id, companyId);
       }
     }
 
@@ -394,10 +408,10 @@ router.post('/:id/items', (req: AuthRequest, res: Response) => {
     db.prepare(`
       UPDATE service_orders
       SET total_services = ?, total_parts = ?, total_amount = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(totals.total_services, totals.total_parts, totalAmount, osId);
+      WHERE id = ? AND company_id = ?
+    `).run(totals.total_services, totals.total_parts, totalAmount, osId, companyId);
 
-    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Item Adicionado', `Adicionou ${item_type === 'part' ? 'peça' : 'serviço'} "${description}" na O.S. #${os.code}`, Number(osId));
+    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Item Adicionado', `Adicionou ${item_type === 'part' ? 'peça' : 'serviço'} "${description}" na O.S. #${os.code}`, Number(osId), undefined, companyId);
   });
 
   addItemTx();
@@ -406,7 +420,13 @@ router.post('/:id/items', (req: AuthRequest, res: Response) => {
 
 // Delete Item
 router.delete('/:id/items/:itemId', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { id: osId, itemId } = req.params;
+
+  const os = db.prepare('SELECT id FROM service_orders WHERE id = ? AND company_id = ?').get(osId, companyId);
+  if (!os) {
+    return res.status(404).json({ error: 'O.S. não encontrada ou não pertence a esta empresa.' });
+  }
 
   const item = db.prepare('SELECT * FROM service_order_items WHERE id = ? AND os_id = ?').get(itemId, osId) as any;
   if (!item) {
@@ -416,7 +436,7 @@ router.delete('/:id/items/:itemId', (req: AuthRequest, res: Response) => {
   const deleteItemTx = db.transaction(() => {
     // If it was a part with product_id, restore stock!
     if (item.item_type === 'part' && item.product_id) {
-      db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ?').run(item.quantity, item.product_id);
+      db.prepare('UPDATE products SET stock_quantity = stock_quantity + ? WHERE id = ? AND company_id = ?').run(item.quantity, item.product_id, companyId);
     }
 
     db.prepare('DELETE FROM service_order_items WHERE id = ?').run(itemId);
@@ -435,8 +455,8 @@ router.delete('/:id/items/:itemId', (req: AuthRequest, res: Response) => {
     db.prepare(`
       UPDATE service_orders
       SET total_services = ?, total_parts = ?, total_amount = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(totals.total_services, totals.total_parts, totalAmount, osId);
+      WHERE id = ? AND company_id = ?
+    `).run(totals.total_services, totals.total_parts, totalAmount, osId, companyId);
   });
 
   deleteItemTx();
@@ -445,11 +465,17 @@ router.delete('/:id/items/:itemId', (req: AuthRequest, res: Response) => {
 
 // Update Checklist
 router.put('/:id/checklist', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osId = req.params.id;
   const { items } = req.body; // array of { id, status, notes }
 
   if (!Array.isArray(items)) {
     return res.status(400).json({ error: 'Itens do checklist devem ser uma lista' });
+  }
+
+  const os = db.prepare('SELECT id FROM service_orders WHERE id = ? AND company_id = ?').get(osId, companyId);
+  if (!os) {
+    return res.status(404).json({ error: 'O.S. não encontrada ou não pertence a esta empresa.' });
   }
 
   const updateChecklistTx = db.transaction(() => {
@@ -470,15 +496,16 @@ router.put('/:id/checklist', (req: AuthRequest, res: Response) => {
 
 // Finalize OS Payment
 router.post('/:id/payment', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osId = req.params.id;
   const { payment_method = 'Dinheiro', discount = 0, final_status = 'Finalizada' } = req.body;
 
-  const os = db.prepare('SELECT * FROM service_orders WHERE id = ?').get(osId) as any;
+  const os = db.prepare('SELECT * FROM service_orders WHERE id = ? AND company_id = ?').get(osId, companyId) as any;
   if (!os) {
-    return res.status(404).json({ error: 'O.S. não encontrada' });
+    return res.status(404).json({ error: 'O.S. não encontrada ou não pertence a esta empresa.' });
   }
 
-  const openSession = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as { id: number } | undefined;
+  const openSession = db.prepare("SELECT id FROM cash_sessions WHERE status = 'open' AND company_id = ? ORDER BY id DESC LIMIT 1").get(companyId) as { id: number } | undefined;
   if (!openSession) {
     return res.status(400).json({ error: 'O caixa está fechado! Abra o caixa antes de registrar o recebimento da O.S.' });
   }
@@ -500,15 +527,15 @@ router.post('/:id/payment', (req: AuthRequest, res: Response) => {
     db.prepare(`
       UPDATE service_orders
       SET discount = ?, status = ?, exit_date = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(numDiscount, final_status, osId);
+      WHERE id = ? AND company_id = ?
+    `).run(numDiscount, final_status, osId, companyId);
 
     db.prepare(`
       INSERT INTO service_order_history (os_id, user_id, user_name, from_status, to_status, notes)
       VALUES (?, ?, ?, ?, ?, ?)
     `).run(osId, req.user!.id, req.user!.name, os.status, final_status, `Pagamento recebido via ${payment_method}. O.S. ${final_status}.`);
 
-    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Pagamento', `Recebeu R$ ${netDue.toFixed(2)} referente à O.S. #${os.code}`, Number(osId));
+    logAudit(req.user!.id, req.user!.name, 'Ordens de Serviço', 'Pagamento', `Recebeu R$ ${netDue.toFixed(2)} referente à O.S. #${os.code}`, Number(osId), undefined, companyId);
   });
 
   payTx();

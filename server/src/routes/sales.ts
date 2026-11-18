@@ -7,6 +7,7 @@ router.use(authMiddleware);
 
 // Create new sale (PDV)
 router.post('/', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const {
     customer_id, items, discount = 0, payment_method = 'Dinheiro',
     installments = 1, notes
@@ -16,14 +17,14 @@ router.post('/', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'A venda deve conter ao menos um item.' });
   }
 
-  const openSession = db.prepare("SELECT * FROM cash_sessions WHERE status = 'open' ORDER BY id DESC LIMIT 1").get() as any;
+  const openSession = db.prepare("SELECT * FROM cash_sessions WHERE status = 'open' AND company_id = ? ORDER BY id DESC LIMIT 1").get(companyId) as any;
   if (!openSession) {
     return res.status(400).json({ error: 'O caixa está fechado! Abra o caixa para realizar vendas.' });
   }
 
   const runSaleTx = db.transaction(() => {
-    // Next sale code
-    const lastCode = db.prepare('SELECT MAX(code) as max_code FROM sales').get() as { max_code: number | null };
+    // Next sale code scoped by company
+    const lastCode = db.prepare('SELECT MAX(code) as max_code FROM sales WHERE company_id = ?').get(companyId) as { max_code: number | null };
     const code = (lastCode?.max_code || 0) + 1;
 
     let totalProducts = 0;
@@ -37,11 +38,11 @@ router.post('/', (req: AuthRequest, res: Response) => {
 
       let costPrice = 0;
       if (item.product_id) {
-        const prod = db.prepare('SELECT id, name, cost_price, stock_quantity FROM products WHERE id = ?').get(item.product_id) as any;
+        const prod = db.prepare('SELECT id, name, cost_price, stock_quantity FROM products WHERE id = ? AND company_id = ?').get(item.product_id, companyId) as any;
         if (prod) {
           costPrice = prod.cost_price || 0;
           // Deduct stock
-          db.prepare('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ?').run(qty, item.product_id);
+          db.prepare('UPDATE products SET stock_quantity = stock_quantity - ? WHERE id = ? AND company_id = ?').run(qty, item.product_id, companyId);
         }
       }
 
@@ -61,11 +62,11 @@ router.post('/', (req: AuthRequest, res: Response) => {
     // Insert sale
     const saleInsert = db.prepare(`
       INSERT INTO sales (
-        code, session_id, user_id, customer_id, total_products,
+        company_id, code, session_id, user_id, customer_id, total_products,
         discount, final_amount, payment_method, installments, notes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      code, openSession.id, req.user!.id, customer_id || null, totalProducts,
+      companyId, code, openSession.id, req.user!.id, customer_id || null, totalProducts,
       numDiscount, finalAmount, payment_method, installments, notes || null
     );
 
@@ -92,7 +93,7 @@ router.post('/', (req: AuthRequest, res: Response) => {
       saleId, `Venda PDV #${code}`
     );
 
-    logAudit(req.user!.id, req.user!.name, 'Caixa', 'Venda', `Realizou a venda #${code} no valor de R$ ${finalAmount.toFixed(2)} (${payment_method})`, Number(saleId));
+    logAudit(req.user!.id, req.user!.name, 'Caixa', 'Venda', `Realizou a venda #${code} no valor de R$ ${finalAmount.toFixed(2)} (${payment_method})`, Number(saleId), undefined, companyId);
 
     return { saleId, code, finalAmount };
   });
@@ -107,18 +108,19 @@ router.post('/', (req: AuthRequest, res: Response) => {
 
 // List sales
 router.get('/', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { page = 1, limit = 50, q } = req.query;
   const offset = (Number(page) - 1) * Number(limit);
 
-  let whereClauses: string[] = [];
-  let params: any[] = [];
+  let whereClauses: string[] = ['s.company_id = ?'];
+  let params: any[] = [companyId];
 
   if (q) {
     whereClauses.push('(s.code LIKE ? OR c.name LIKE ?)');
     params.push(`%${q}%`, `%${q}%`);
   }
 
-  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+  const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
 
   const sales = db.prepare(`
     SELECT s.*, c.name as customer_name, u.name as user_name,
@@ -136,21 +138,22 @@ router.get('/', (req: AuthRequest, res: Response) => {
 
 // Get sale details (for receipts)
 router.get('/:id', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const sale = db.prepare(`
     SELECT s.*, c.name as customer_name, c.cpf_cnpj as customer_cpf, c.phone as customer_phone,
            u.name as user_name
     FROM sales s
     LEFT JOIN customers c ON c.id = s.customer_id
     JOIN users u ON u.id = s.user_id
-    WHERE s.id = ?
-  `).get(req.params.id) as any;
+    WHERE s.id = ? AND s.company_id = ?
+  `).get(req.params.id, companyId) as any;
 
   if (!sale) {
-    return res.status(404).json({ error: 'Venda não encontrada' });
+    return res.status(404).json({ error: 'Venda não encontrada ou não pertence a esta empresa.' });
   }
 
   const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all(req.params.id);
-  const company = db.prepare('SELECT * FROM companies LIMIT 1').get();
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(sale.company_id || companyId);
 
   return res.json({ sale, items, company });
 });

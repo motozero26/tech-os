@@ -6,14 +6,15 @@ const router = Router();
 router.use(authMiddleware);
 
 router.get('/summary-stats', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const today = new Date().toISOString().slice(0, 10);
 
   // Sales today
   const salesToday = db.prepare(`
     SELECT COUNT(*) as count, COALESCE(SUM(final_amount), 0) as total
     FROM sales
-    WHERE DATE(created_at) = DATE('now', 'localtime') AND status = 'completed'
-  `).get() as { count: number; total: number };
+    WHERE DATE(created_at) = DATE('now', 'localtime') AND status = 'completed' AND company_id = ?
+  `).get(companyId) as { count: number; total: number };
 
   // OS stats
   const osStats = db.prepare(`
@@ -22,18 +23,19 @@ router.get('/summary-stats', (req: AuthRequest, res: Response) => {
       COUNT(CASE WHEN status = 'Pronta' THEN 1 END) as ready_os,
       COUNT(CASE WHEN DATE(entry_date) = DATE('now', 'localtime') THEN 1 END) as os_today
     FROM service_orders
-  `).get() as { open_os: number; ready_os: number; os_today: number };
+    WHERE company_id = ?
+  `).get(companyId) as { open_os: number; ready_os: number; os_today: number };
 
   // Total customers
-  const customersCount = db.prepare('SELECT COUNT(*) as count FROM customers').get() as { count: number };
+  const customersCount = db.prepare('SELECT COUNT(*) as count FROM customers WHERE company_id = ?').get(companyId) as { count: number };
 
   // Active cash register
   const openCash = db.prepare(`
     SELECT id, user_name, opening_balance, opened_at
     FROM cash_sessions
-    WHERE status = 'open'
+    WHERE status = 'open' AND company_id = ?
     ORDER BY id DESC LIMIT 1
-  `).get();
+  `).get(companyId);
 
   return res.json({
     sales_today_count: salesToday.count,
@@ -47,6 +49,7 @@ router.get('/summary-stats', (req: AuthRequest, res: Response) => {
 });
 
 router.get('/upcoming-deadlines', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const osList = db.prepare(`
     SELECT so.id, so.code, so.status, so.deadline_date, so.reported_defects,
            c.name as customer_name, c.phone as customer_phone,
@@ -56,14 +59,16 @@ router.get('/upcoming-deadlines', (req: AuthRequest, res: Response) => {
     LEFT JOIN customer_devices cd ON cd.id = so.device_id
     WHERE so.status NOT IN ('Finalizada', 'Cancelada', 'Finalizada sem reparo')
       AND so.deadline_date IS NOT NULL
+      AND so.company_id = ?
     ORDER BY so.deadline_date ASC
     LIMIT 10
-  `).all();
+  `).all(companyId);
 
   return res.json(osList);
 });
 
 router.get('/charts', (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id || 1;
   const { period = 'monthly', year = new Date().getFullYear(), month = new Date().getMonth() + 1 } = req.query;
 
   // Monthly services count
@@ -73,10 +78,10 @@ router.get('/charts', (req: AuthRequest, res: Response) => {
            COALESCE(SUM(soi.total_price), 0) as services_total
     FROM service_order_items soi
     JOIN service_orders so ON so.id = soi.os_id
-    WHERE soi.item_type = 'service'
+    WHERE soi.item_type = 'service' AND so.company_id = ?
     GROUP BY strftime('%Y-%m', so.created_at)
     ORDER BY month DESC LIMIT 6
-  `).all();
+  `).all(companyId);
 
   // Monthly items sold count
   const itemsChart = db.prepare(`
@@ -85,10 +90,10 @@ router.get('/charts', (req: AuthRequest, res: Response) => {
            COALESCE(SUM(si.total_price), 0) as items_total
     FROM sale_items si
     JOIN sales s ON s.id = si.sale_id
-    WHERE s.status = 'completed'
+    WHERE s.status = 'completed' AND s.company_id = ?
     GROUP BY strftime('%Y-%m', s.created_at)
     ORDER BY month DESC LIMIT 6
-  `).all();
+  `).all(companyId);
 
   return res.json({
     services: servicesChart,

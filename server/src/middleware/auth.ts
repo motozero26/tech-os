@@ -22,7 +22,7 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; name: string; email: string; role: string; company_id?: number };
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as { id: number; name: string; email: string; role: string; company_id?: number };
     req.user = decoded;
 
     // Check if store subscription is overdue/expired for write operations (POST, PUT, PATCH, DELETE)
@@ -64,12 +64,19 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
   }
 }
 
-export function logAudit(userId: number | null, userName: string | null, module: string, action: string, description: string, entityId?: number, ip?: string) {
+export function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFunction) {
+  if (req.user?.role !== 'superadmin' && req.user?.role !== 'master') {
+    return res.status(403).json({ error: 'Acesso negado: Requer privilégios de Administrador SaaS ou Master.' });
+  }
+  next();
+}
+
+export function logAudit(userId: number | null, userName: string | null, module: string, action: string, description: string, entityId?: number, ip?: string, companyId?: number) {
   try {
     db.prepare(`
-      INSERT INTO audit_logs (user_id, user_name, module, action, description, entity_id, ip_address)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(userId || null, userName || 'Sistema', module, action, description, entityId || null, ip || '127.0.0.1');
+      INSERT INTO audit_logs (company_id, user_id, user_name, module, action, description, entity_id, ip_address)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(companyId || 1, userId || null, userName || 'Sistema', module, action, description, entityId || null, ip || '127.0.0.1');
   } catch (error) {
     console.error('Erro ao gravar log de auditoria:', error);
   }

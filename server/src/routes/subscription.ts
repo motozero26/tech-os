@@ -203,6 +203,11 @@ router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
 
+  const companyId = req.user?.company_id || 1;
+  if (req.user?.role !== 'superadmin' && payment.company_id !== companyId) {
+    return res.status(403).json({ error: 'Acesso negado a esta fatura' });
+  }
+
   // Already paid
   if (payment.status === 'paid') {
     const comp = db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
@@ -303,6 +308,11 @@ router.post('/confirm-payment/:id', (req: AuthRequest, res: Response) => {
   const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
+  }
+
+  const companyId = req.user?.company_id || 1;
+  if (req.user?.role !== 'superadmin' && payment.company_id !== companyId) {
+    return res.status(403).json({ error: 'Acesso negado a esta fatura' });
   }
 
   const tx = db.transaction(() => {
