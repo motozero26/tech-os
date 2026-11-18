@@ -53,11 +53,15 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, s
           </div>
         )}
 
-        <div className="flex flex-col items-center text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-blue-500 flex items-center justify-center text-white shadow-xl shadow-blue-500/25 mb-4">
+        <div
+          onClick={onBackToLanding}
+          className={`flex flex-col items-center text-center mb-8 ${onBackToLanding ? 'cursor-pointer group' : ''}`}
+          title={onBackToLanding ? 'Voltar para a página inicial' : undefined}
+        >
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-blue-500 flex items-center justify-center text-white shadow-xl shadow-blue-500/25 mb-4 group-hover:scale-105 transition-transform">
             <Wrench className="w-8 h-8" />
           </div>
-          <h1 className="text-2xl font-black text-white tracking-wide">TechOS</h1>
+          <h1 className="text-2xl font-black text-white tracking-wide group-hover:text-blue-400 transition-colors">TechOS</h1>
           <p className="text-sm text-slate-400 mt-1">SaaS de Gestão para Assistência Técnica & Varejo</p>
         </div>
 

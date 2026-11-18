@@ -188,7 +188,11 @@ export const Layout: React.FC<LayoutProps> = ({
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col md:flex-row antialiased">
       {/* Mobile Header */}
       <div className="md:hidden flex items-center justify-between p-4 bg-slate-950 border-b border-slate-800 print:hidden">
-        <div className="flex items-center gap-2.5">
+        <div
+          onClick={() => setCurrentTab('dashboard')}
+          className="flex items-center gap-2.5 cursor-pointer hover:opacity-85 transition"
+          title="Voltar ao início"
+        >
           {company?.logo ? (
             <img src={company.logo} alt="Logo" className="h-8 max-w-[120px] object-contain rounded" />
           ) : (
@@ -218,7 +222,11 @@ export const Layout: React.FC<LayoutProps> = ({
       `}>
         <div>
           {/* Logo & Brand */}
-          <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3">
+          <div
+            onClick={() => setCurrentTab('dashboard')}
+            className="p-5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-3 cursor-pointer group hover:bg-slate-100 dark:hover:bg-slate-900/60 transition"
+            title="Voltar à tela inicial (Dashboard)"
+          >
             {company?.logo ? (
               <img
                 src={company.logo}

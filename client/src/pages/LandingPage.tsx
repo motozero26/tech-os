@@ -769,13 +769,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
       {/* 1. TOP NAVBAR */}
       <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-slate-800/80">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="flex items-center gap-3 cursor-pointer group"
+            title="Voltar à página inicial"
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-blue-500/30 group-hover:scale-105 transition-transform">
               <Wrench className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-xl font-black tracking-tight text-white">TechOS</span>
+                <span className="text-xl font-black tracking-tight text-white group-hover:text-blue-400 transition-colors">TechOS</span>
                 <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
                   PRO
                 </span>
@@ -784,7 +792,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
                 Gestão para Assistência Técnica & Varejo
               </p>
             </div>
-          </div>
+          </a>
 
           <nav className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-300">
             <a href="#recursos" className="hover:text-blue-400 transition-colors">
@@ -1383,13 +1391,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
       {/* 9. FOOTER */}
       <footer className="border-t border-slate-800/80 bg-slate-950 py-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-6 text-xs text-slate-500">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white">
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="flex items-center gap-3 cursor-pointer group"
+            title="Voltar ao início"
+          >
+            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white group-hover:scale-105 transition-transform">
               <Wrench className="w-4 h-4" />
             </div>
-            <span className="font-bold text-slate-300">TechOS</span>
+            <span className="font-bold text-slate-300 group-hover:text-white transition-colors">TechOS</span>
             <span>— Todos os direitos reservados.</span>
-          </div>
+          </a>
 
           <div className="flex items-center gap-6">
             <button
