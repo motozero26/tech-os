@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Wrench, Lock, Mail, ArrowRight, AlertCircle } from 'lucide-react';
+import { Wrench, Lock, Mail, ArrowRight, AlertCircle, ArrowLeft, Zap, Sparkles } from 'lucide-react';
 import { api, setAuthToken, setSavedUser } from '../api.ts';
 
 interface LoginProps {
   onLoginSuccess: () => void;
+  onBackToLanding?: () => void;
+  selectedPlan?: string | null;
 }
 
-export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+export const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, selectedPlan }) => {
   const [email, setEmail] = useState('admin@techos.com.br');
   const [password, setPassword] = useState('admin123');
   const [loading, setLoading] = useState(false);
@@ -30,8 +32,27 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4">
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 relative">
+      {onBackToLanding && (
+        <button
+          onClick={onBackToLanding}
+          className="absolute top-6 left-6 px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-bold flex items-center gap-2 transition"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Voltar ao Site / Conhecer o TechOS</span>
+        </button>
+      )}
+
       <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl">
+        {selectedPlan && (
+          <div className="mb-6 p-3 rounded-xl bg-gradient-to-r from-blue-950/80 to-indigo-950/80 border border-blue-500/30 flex items-center gap-2.5 text-xs text-blue-300">
+            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+            <div>
+              Plano Selecionado: <strong className="text-white">{selectedPlan}</strong> (7 dias de teste grátis liberados)
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-col items-center text-center mb-8">
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-700 to-blue-500 flex items-center justify-center text-white shadow-xl shadow-blue-500/25 mb-4">
             <Wrench className="w-8 h-8" />

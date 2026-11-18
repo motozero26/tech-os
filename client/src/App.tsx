@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getAuthToken } from './api.ts';
 import { Layout } from './components/Layout.tsx';
 import { Login } from './pages/Login.tsx';
+import { LandingPage } from './pages/LandingPage.tsx';
 import { Dashboard } from './pages/Dashboard.tsx';
 import { OSHub } from './pages/OS/OSHub.tsx';
 import { NewOS } from './pages/OS/NewOS.tsx';
@@ -20,6 +21,13 @@ import { NotaFiscal } from './pages/Fiscal/NotaFiscal.tsx';
 
 export const App: React.FC = () => {
   const [token, setToken] = useState<string | null>(getAuthToken());
+  const [authView, setAuthView] = useState<'landing' | 'login'>(() => {
+    if (window.location.hash === '#login' || window.location.pathname === '/login') {
+      return 'login';
+    }
+    return 'landing';
+  });
+  const [selectedPlanForRegistration, setSelectedPlanForRegistration] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState<string>(() => {
     return localStorage.getItem('current_tab') || 'dashboard';
   });
@@ -37,7 +45,23 @@ export const App: React.FC = () => {
   }, [currentTab]);
 
   if (!token) {
-    return <Login onLoginSuccess={() => setToken(getAuthToken())} />;
+    if (authView === 'login') {
+      return (
+        <Login
+          onLoginSuccess={() => setToken(getAuthToken())}
+          onBackToLanding={() => setAuthView('landing')}
+          selectedPlan={selectedPlanForRegistration}
+        />
+      );
+    }
+    return (
+      <LandingPage
+        onGoToLogin={(plan) => {
+          setSelectedPlanForRegistration(plan || null);
+          setAuthView('login');
+        }}
+      />
+    );
   }
 
   // Página separada e dedicada do Dono do Sistema (Painel SaaS)
@@ -124,6 +148,21 @@ export const App: React.FC = () => {
       {currentTab === 'saas_admin' && <AdminSaaS />}
 
       {currentTab === 'configuracoes' && <Configuracoes />}
+
+      {currentTab === 'landing' && (
+        <div className="space-y-4">
+          <div className="p-3 bg-blue-950/60 border border-blue-800/80 rounded-xl flex items-center justify-between text-xs text-blue-300">
+            <span>Visualização da página pública de vendas do TechOS.</span>
+            <button
+              onClick={() => setCurrentTab('dashboard')}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-lg transition"
+            >
+              Voltar ao Meu Início
+            </button>
+          </div>
+          <LandingPage onGoToLogin={() => setCurrentTab('dashboard')} />
+        </div>
+      )}
     </Layout>
   );
 };

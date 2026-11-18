@@ -399,6 +399,21 @@ export const Layout: React.FC<LayoutProps> = ({
 
           {/* Quick Action Buttons */}
           <div className="flex items-center gap-3">
+            {/* Link para Página Pública de Apresentação / Vendas */}
+            <button
+              type="button"
+              onClick={() => setCurrentTab('landing')}
+              className={`hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition ${
+                currentTab === 'landing'
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-900 hover:bg-slate-800 border-slate-800 text-slate-300 hover:text-white'
+              }`}
+              title="Acessar a página de vendas e apresentação do TechOS"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+              <span>Ver Site / Planos</span>
+            </button>
+
             {/* Quick Dark/Light Theme Toggle */}
             <button
               type="button"
