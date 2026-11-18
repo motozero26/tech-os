@@ -44,16 +44,27 @@ git push -u origin main
 
 ## ⚡ Como Publicar na Vercel (Frontend)
 
-1. Acesse o dashboard da [Vercel](https://vercel.com/) e clique em **Add New > Project**.
-2. Importe o repositório do GitHub.
-3. Nas configurações do projeto:
+O repositório já está configurado com arquivos `vercel.json` prontos para deploy automático, tanto a partir da raiz do monorepo quanto da pasta `client`.
+
+### Opção Recomendada (Diretório Raiz `./`):
+1. No dashboard da [Vercel](https://vercel.com/), clique em **Add New > Project** e importe o repositório `motozero26/tech-os`.
+2. Mantenha as configurações padrão (a Vercel reconhecerá o preset `Vite` e o `vercel.json` da raiz automaticamente).
+3. Se o painel solicitar confirmação:
    * **Framework Preset**: `Vite`
-   * **Root Directory**: `./` (ou `./client`)
-   * **Build Command**: `npm run build --workspace=client`
+   * **Root Directory**: `./`
+   * **Build Command**: `npm run build --workspace=client` (ou `npm run vercel-build`)
    * **Output Directory**: `client/dist`
-4. Em **Environment Variables**, adicione:
-   * `VITE_API_URL`: URL onde sua API backend está hospedada (ex: `https://api.techos.com.br`).
-5. Clique em **Deploy**. O arquivo `vercel.json` na raiz já configura os rewrites para roteamento client-side sem erros 404 ao recarregar a página.
+4. Em **Environment Variables**, adicione (se backend externo):
+   * `VITE_API_URL`: URL da sua API backend (ex: `https://api.seudominio.com`).
+5. Clique em **Deploy**.
+
+### Opção Alternativa (Root Directory `client`):
+* Caso prefira definir o **Root Directory** como `client` nas opções da Vercel:
+  * **Framework Preset**: `Vite`
+  * **Root Directory**: `client`
+  * **Build Command**: `vite build`
+  * **Output Directory**: `dist`
+  *(O arquivo `client/vercel.json` garante automaticamente os rewrites de SPA).*
 
 ---
 

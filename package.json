@@ -10,6 +10,8 @@
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
     "build": "npm run build --workspace=server && npm run build --workspace=client",
+    "build:client": "npm run build --workspace=client",
+    "vercel-build": "npm run build --workspace=client",
     "sync": "git add . && git commit -m \"sync: automatic update\" && git push origin main",
     "start": "node server/dist/index.js"
   },
