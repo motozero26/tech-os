@@ -73,64 +73,8 @@ app.use('/api/subscription', subscriptionRouter);
 app.use('/api/saas', saasRouter);
 app.use('/api/fiscal', fiscalRouter);
 
-app.get('/api/health', async (req, res) => {
-  const isDiag = req.query.diag === '1';
-  if (!isDiag) {
-    return res.json({ status: 'ok', system: 'TechOS API', time: new Date() });
-  }
-
-  const envKeys = [
-    'POSTGRES_URL', 'DATABASE_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING',
-    'SUPABASE_URL', 'POSTGRES_HOST', 'POSTGRES_PORT'
-  ].filter(k => Boolean(process.env[k]));
-
-  let dbHost = 'none';
-  let dbPort = 'none';
-  const effectiveConn = getEffectiveConnectionString();
-  if (effectiveConn) {
-    try {
-      const parsed = new URL(effectiveConn.replace(/^postgres(ql)?:\/\//, 'http://'));
-      dbHost = parsed.hostname;
-      dbPort = parsed.port || '5432';
-    } catch {}
-  }
-
-  let dbTest: any = { status: 'untested' };
-  try {
-    const start = Date.now();
-    const testRes = await Promise.race([
-      (async () => {
-        const ping = await db.prepare('SELECT 1 as connected').get();
-        const reg = await pool.query("SELECT to_regclass('public.plans') as tbl");
-        let count = 0;
-        let usersSample: any[] = [];
-        if (reg.rows[0]?.tbl) {
-          const c = await pool.query("SELECT count(*) as count FROM plans");
-          count = Number(c.rows[0]?.count);
-          const u = await pool.query("SELECT id, email, role, active, substring(password_hash, 1, 7) as hash_prefix FROM users LIMIT 5");
-          usersSample = u.rows;
-        }
-        return { ping, has_plans_table: Boolean(reg.rows[0]?.tbl), plans_count: count, users: usersSample };
-      })(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout (3000ms)')), 3000))
-    ]);
-    dbTest = { status: 'connected', latency_ms: Date.now() - start, result: testRes };
-  } catch (err: any) {
-    dbTest = { status: 'error', error: err.message };
-  }
-
-  res.json({
-    status: 'ok',
-    system: 'TechOS API',
-    time: new Date(),
-    diagnostics: {
-      isPostgres,
-      available_env_vars: envKeys,
-      db_host: dbHost,
-      db_port: dbPort,
-      db_test: dbTest
-    }
-  });
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', system: 'TechOS API', time: new Date() });
 });
 
 // Error handler
