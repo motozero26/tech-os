@@ -245,7 +245,7 @@ router.get('/plans', async (req: AuthRequest, res: Response) => {
 
   return res.json(plans.map(p => ({
     ...p,
-    features: p.features ? JSON.parse(p.features) : []
+    features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || [])
   })));
 });
 

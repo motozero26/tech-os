@@ -17,6 +17,27 @@ import subscriptionRouter from './routes/subscription.js';
 import saasRouter from './routes/saas.js';
 import fiscalRouter from './routes/fiscal.js';
 
+// Patch Express 4 Layer to automatically catch rejected promises in async route handlers
+try {
+  const Layer = require('express/lib/router/layer');
+  const origHandle = Layer.prototype.handle_request;
+  Layer.prototype.handle_request = function (req: any, res: any, next: any) {
+    if (this.handle.length > 3) {
+      return origHandle.apply(this, arguments);
+    }
+    try {
+      const p = this.handle.apply(this, arguments);
+      if (p && typeof p.catch === 'function') {
+        p.catch(next);
+      }
+    } catch (e) {
+      next(e);
+    }
+  };
+} catch (e) {
+  console.warn('Could not patch Express router Layer for async errors:', e);
+}
+
 dotenv.config();
 
 // Initialize SQLite database

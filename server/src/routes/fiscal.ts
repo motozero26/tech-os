@@ -780,7 +780,7 @@ router.get('/invoices/:id/danfe', requireGoldPlan, async (req: AuthRequest, res:
   let items = [];
   if (invoice.items_json) {
     try {
-      items = JSON.parse(invoice.items_json);
+      items = typeof invoice.items_json === 'string' ? JSON.parse(invoice.items_json) : invoice.items_json;
     } catch (e) {
       items = [];
     }

@@ -15,7 +15,7 @@ router.get('/public-plans', async (req: Request, res: Response) => {
   const plans = await db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
   const formatted = plans.map(p => ({
     ...p,
-    features: p.features ? JSON.parse(p.features) : []
+    features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || [])
   }));
   return res.json(formatted);
 });
@@ -362,7 +362,7 @@ router.get('/current', async (req: AuthRequest, res: Response) => {
       name: company.plan_title || company.plan_name,
       price_monthly: company.price_monthly || 49.90,
       price_yearly: company.price_yearly || 49.90,
-      features: company.features ? JSON.parse(company.features) : []
+      features: typeof company.features === 'string' ? JSON.parse(company.features) : (company.features || [])
     }
   });
 });
@@ -372,7 +372,7 @@ router.get('/plans', async (req: AuthRequest, res: Response) => {
   const plans = await db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
   const formatted = plans.map(p => ({
     ...p,
-    features: p.features ? JSON.parse(p.features) : []
+    features: typeof p.features === 'string' ? JSON.parse(p.features) : (p.features || [])
   }));
   return res.json(formatted);
 });
