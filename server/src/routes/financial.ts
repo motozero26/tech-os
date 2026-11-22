@@ -6,33 +6,33 @@ const router = Router();
 router.use(authMiddleware);
 
 // Financial summary
-router.get('/summary', (req: AuthRequest, res: Response) => {
+router.get('/summary', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { period = 'month', start_date, end_date } = req.query;
 
   // Total sales revenue
-  const salesRev = db.prepare(`
+  const salesRev = await db.prepare(`
     SELECT COALESCE(SUM(final_amount), 0) as total
     FROM sales
     WHERE status = 'completed' AND company_id = ?
   `).get(companyId) as { total: number };
 
   // Total OS revenue
-  const osRev = db.prepare(`
+  const osRev = await db.prepare(`
     SELECT COALESCE(SUM(total_amount - discount), 0) as total
     FROM service_orders
     WHERE status IN ('Finalizada', 'Pronta') AND company_id = ?
   `).get(companyId) as { total: number };
 
   // Total expenses paid
-  const expensesPaid = db.prepare(`
+  const expensesPaid = await db.prepare(`
     SELECT COALESCE(SUM(amount), 0) as total
     FROM expenses
     WHERE status = 'paid' AND company_id = ?
   `).get(companyId) as { total: number };
 
   // Total expenses pending
-  const expensesPending = db.prepare(`
+  const expensesPending = await db.prepare(`
     SELECT COALESCE(SUM(amount), 0) as total
     FROM expenses
     WHERE status = 'pending' AND company_id = ?
@@ -52,7 +52,7 @@ router.get('/summary', (req: AuthRequest, res: Response) => {
 });
 
 // Expenses
-router.get('/expenses', (req: AuthRequest, res: Response) => {
+router.get('/expenses', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { status, category } = req.query;
 
@@ -70,12 +70,12 @@ router.get('/expenses', (req: AuthRequest, res: Response) => {
   }
 
   const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
-  const expenses = db.prepare(`SELECT * FROM expenses ${whereSql} ORDER BY due_date ASC`).all(...params);
+  const expenses = await db.prepare(`SELECT * FROM expenses ${whereSql} ORDER BY due_date ASC`).all(...params);
 
   return res.json(expenses);
 });
 
-router.post('/expenses', (req: AuthRequest, res: Response) => {
+router.post('/expenses', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { description, category, due_date, amount, payment_method, status = 'pending', notes } = req.body;
 
@@ -85,21 +85,21 @@ router.post('/expenses', (req: AuthRequest, res: Response) => {
 
   const numAmount = Number(amount);
 
-  const ins = db.prepare(`
+  const ins = await db.prepare(`
     INSERT INTO expenses (company_id, description, category, due_date, amount, payment_method, status, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(companyId, description, category || 'Geral', due_date, numAmount, payment_method || null, status, notes || null);
 
-  logAudit(req.user!.id, req.user!.name, 'Financeiro', 'Cadastro de Despesa', `Cadastrou a despesa "${description}" no valor de R$ ${numAmount.toFixed(2)}`, Number(ins.lastInsertRowid), undefined, companyId);
+  await logAudit(req.user!.id, req.user!.name, 'Financeiro', 'Cadastro de Despesa', `Cadastrou a despesa "${description}" no valor de R$ ${numAmount.toFixed(2)}`, Number(ins.lastInsertRowid), undefined, companyId);
 
   return res.status(201).json({ id: ins.lastInsertRowid });
 });
 
-router.patch('/expenses/:id/pay', (req: AuthRequest, res: Response) => {
+router.patch('/expenses/:id/pay', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { payment_method = 'Dinheiro' } = req.body;
 
-  const result = db.prepare(`
+  const result = await db.prepare(`
     UPDATE expenses
     SET status = 'paid', payment_date = CURRENT_TIMESTAMP, payment_method = ?
     WHERE id = ? AND company_id = ?
@@ -113,13 +113,13 @@ router.patch('/expenses/:id/pay', (req: AuthRequest, res: Response) => {
 });
 
 // Card rates
-router.get('/rates', (req: AuthRequest, res: Response) => {
+router.get('/rates', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const rates = db.prepare('SELECT * FROM card_rates WHERE company_id = ? ORDER BY card_type ASC, installments ASC').all(companyId);
+  const rates = await db.prepare('SELECT * FROM card_rates WHERE company_id = ? ORDER BY card_type ASC, installments ASC').all(companyId);
   return res.json(rates);
 });
 
-router.post('/rates', (req: AuthRequest, res: Response) => {
+router.post('/rates', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { rates } = req.body; // array of { card_type, installments, rate_percent }
 
@@ -127,20 +127,20 @@ router.post('/rates', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Formato inválido' });
   }
 
-  const saveRatesTx = db.transaction(() => {
-    db.prepare('DELETE FROM card_rates WHERE company_id = ?').run(companyId);
-    const insert = db.prepare('INSERT INTO card_rates (company_id, card_type, installments, rate_percent) VALUES (?, ?, ?, ?)');
+  const saveRatesTx = db.transaction(async () => {
+    await db.prepare('DELETE FROM card_rates WHERE company_id = ?').run(companyId);
+    const insert = await db.prepare('INSERT INTO card_rates (company_id, card_type, installments, rate_percent) VALUES (?, ?, ?, ?)');
     rates.forEach(r => insert.run(companyId, r.card_type, Number(r.installments), Number(r.rate_percent)));
   });
 
-  saveRatesTx();
+  await saveRatesTx();
   return res.json({ success: true });
 });
 
 // Technician commissions
-router.get('/commissions', (req: AuthRequest, res: Response) => {
+router.get('/commissions', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const technicians = db.prepare(`
+  const technicians = await db.prepare(`
     SELECT u.id, u.name, u.commission_rate,
            COALESCE(SUM(soi.total_price), 0) as services_total,
            COALESCE(SUM(soi.total_price * (u.commission_rate / 100)), 0) as commission_amount

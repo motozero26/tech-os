@@ -11,8 +11,8 @@ const router = Router();
 // ====================================================
 
 // Public plans list (Prata & Ouro)
-router.get('/public-plans', (req: Request, res: Response) => {
-  const plans = db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
+router.get('/public-plans', async (req: Request, res: Response) => {
+  const plans = await db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
   const formatted = plans.map(p => ({
     ...p,
     features: p.features ? JSON.parse(p.features) : []
@@ -41,17 +41,17 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
   }
 
   // Check if admin_email already exists in users
-  const existingUser = db.prepare('SELECT id FROM users WHERE email = ?').get(admin_email);
+  const existingUser = await db.prepare('SELECT id FROM users WHERE email = ?').get(admin_email);
   if (existingUser) {
     return res.status(400).json({ error: 'Este e-mail já possui cadastro no sistema. Por favor, acesse o login ou use outro e-mail.' });
   }
 
-  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(plan_id) as any;
+  const plan = await db.prepare('SELECT * FROM plans WHERE id = ?').get(plan_id) as any;
   if (!plan) {
     return res.status(404).json({ error: 'Plano não encontrado' });
   }
 
-  const platSettings = db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
+  const platSettings = await db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
 
   // Calculate pricing based on billing cycle
   let amount = plan.price_monthly;
@@ -67,9 +67,9 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
   const now = new Date();
 
   // Create company and user inside a transaction
-  const createTx = db.transaction(() => {
+  const createTx = db.transaction(async () => {
     // 1. Insert Company with subscription_status = 'pending_payment'
-    const compIns = db.prepare(`
+    const compIns = await db.prepare(`
       INSERT INTO companies (
         company_code, name, trade_name, cnpj, phone, email,
         plan_id, plan_name, subscription_status, access_expires_at
@@ -82,7 +82,7 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
 
     // 2. Insert Master User
     const passwordHash = bcrypt.hashSync(admin_password, 10);
-    const userIns = db.prepare(`
+    const userIns = await db.prepare(`
       INSERT INTO users (company_id, name, email, password_hash, role, active)
       VALUES (?, ?, ?, ?, 'master', 1)
     `).run(companyId, admin_name, admin_email, passwordHash);
@@ -91,7 +91,7 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
     return { companyId, userId };
   });
 
-  const { companyId, userId } = createTx();
+  const { companyId, userId } = await createTx();
 
   // Generate PIX data
   const pixKey = platSettings?.pix_key || '12.345.678/0001-90';
@@ -138,7 +138,7 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
   }
 
   // Insert subscription payment invoice
-  const ins = db.prepare(`
+  const ins = await db.prepare(`
     INSERT INTO subscription_payments (
       company_id, plan_id, plan_name, billing_cycle, amount,
       payment_method, payment_gateway, gateway_payment_id, pix_copia_cola, pix_qrcode, status
@@ -150,7 +150,7 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
 
   const paymentId = ins.lastInsertRowid;
 
-  logAudit(Number(userId), admin_name, 'Assinatura', 'Compra Direta do Site', `Novo cliente cadastrou a loja "${resolvedName}" e gerou fatura #${paymentId} para o plano ${plan.name} no valor de R$ ${amount.toFixed(2)}`, Number(paymentId), undefined, Number(companyId));
+  await logAudit(Number(userId), admin_name, 'Assinatura', 'Compra Direta do Site', `Novo cliente cadastrou a loja "${resolvedName}" e gerou fatura #${paymentId} para o plano ${plan.name} no valor de R$ ${amount.toFixed(2)}`, Number(paymentId), undefined, Number(companyId));
 
   return res.status(201).json({
     payment_id: paymentId,
@@ -174,13 +174,13 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
 // Public payment status verification (for polling on checkout modal)
 router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
   const paymentId = req.params.id;
-  const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  const payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
 
-  const user = db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
-  const comp = db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
+  const user = await db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
+  const comp = await db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
 
   if (payment.status === 'paid') {
     const token = user ? jwt.sign(
@@ -208,7 +208,7 @@ router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
   }
 
   // Check if approved by Mercado Pago
-  const platSettings = db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
+  const platSettings = await db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
   if (payment.payment_gateway === 'mercadopago' && platSettings?.mercadopago_token && payment.gateway_payment_id) {
     try {
       const mpCheck = await fetch(`https://api.mercadopago.com/v1/payments/${payment.gateway_payment_id}`, {
@@ -220,16 +220,17 @@ router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
           const baseDate = new Date();
           baseDate.setDate(baseDate.getDate() + 30);
 
-          db.transaction(() => {
-            db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
-            db.prepare(`
+          const tx = db.transaction(async () => {
+            await db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
+            await db.prepare(`
               UPDATE companies
               SET plan_id = ?, plan_name = ?, subscription_status = 'active', access_expires_at = ?
               WHERE id = ?
             `).run(payment.plan_id, payment.plan_name, baseDate.toISOString(), payment.company_id);
-          })();
+          });
+          await tx();
 
-          logAudit(user?.id || null, user?.name || 'Cliente', 'Assinatura', 'Pagamento Aprovado Mercado Pago', `E-mail de confirmação enviado para ${user?.email}. Acesso ativado.`, Number(paymentId), undefined, Number(payment.company_id));
+          await logAudit(user?.id || null, user?.name || 'Cliente', 'Assinatura', 'Pagamento Aprovado Mercado Pago', `E-mail de confirmação enviado para ${user?.email}. Acesso ativado.`, Number(paymentId), undefined, Number(payment.company_id));
 
           const token = user ? jwt.sign(
             { id: user.id, name: user.name, email: user.email, role: user.role, company_id: user.company_id },
@@ -269,7 +270,7 @@ router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
 // Public instant confirmation (for simulation, testing or manual confirmation)
 router.post('/public-confirm-payment/:id', async (req: Request, res: Response) => {
   const paymentId = req.params.id;
-  const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  const payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
@@ -277,18 +278,19 @@ router.post('/public-confirm-payment/:id', async (req: Request, res: Response) =
   const baseDate = new Date();
   baseDate.setDate(baseDate.getDate() + 30);
 
-  db.transaction(() => {
-    db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
-    db.prepare(`
+  const tx = db.transaction(async () => {
+    await db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(paymentId);
+    await db.prepare(`
       UPDATE companies
       SET plan_id = ?, plan_name = ?, subscription_status = 'active', access_expires_at = ?
       WHERE id = ?
     `).run(payment.plan_id, payment.plan_name, baseDate.toISOString(), payment.company_id);
-  })();
+  });
+          await tx();
 
-  const user = db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
+  const user = await db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
 
-  logAudit(user?.id || null, user?.name || 'Cliente', 'Assinatura', 'Pagamento Confirmado', `Fatura #${paymentId} do plano ${payment.plan_name} aprovada. Acesso liberado até ${baseDate.toLocaleDateString('pt-BR')}. E-mail de confirmação enviado para ${user?.email}.`, Number(paymentId), undefined, Number(payment.company_id));
+  await logAudit(user?.id || null, user?.name || 'Cliente', 'Assinatura', 'Pagamento Confirmado', `Fatura #${paymentId} do plano ${payment.plan_name} aprovada. Acesso liberado até ${baseDate.toLocaleDateString('pt-BR')}. E-mail de confirmação enviado para ${user?.email}.`, Number(paymentId), undefined, Number(payment.company_id));
 
   const token = user ? jwt.sign(
     { id: user.id, name: user.name, email: user.email, role: user.role, company_id: user.company_id },
@@ -317,9 +319,9 @@ router.post('/public-confirm-payment/:id', async (req: Request, res: Response) =
 router.use(authMiddleware);
 
 // Get current store subscription
-router.get('/current', (req: AuthRequest, res: Response) => {
+router.get('/current', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const company = db.prepare(`
+  const company = await db.prepare(`
     SELECT c.*, p.name as plan_title, p.price_monthly, p.price_yearly, p.features
     FROM companies c
     LEFT JOIN plans p ON p.id = c.plan_id
@@ -358,8 +360,8 @@ router.get('/current', (req: AuthRequest, res: Response) => {
 });
 
 // Get available plans for renewal / upgrade (Strictly the 2 official plans: Prata and Ouro)
-router.get('/plans', (req: AuthRequest, res: Response) => {
-  const plans = db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
+router.get('/plans', async (req: AuthRequest, res: Response) => {
+  const plans = await db.prepare("SELECT * FROM plans WHERE active = 1 AND name IN ('Prata', 'Ouro') ORDER BY price_monthly ASC").all() as any[];
   const formatted = plans.map(p => ({
     ...p,
     features: p.features ? JSON.parse(p.features) : []
@@ -371,12 +373,12 @@ router.get('/plans', (req: AuthRequest, res: Response) => {
 router.post('/checkout', async (req: AuthRequest, res: Response) => {
   const { plan_id, billing_cycle = 'monthly', payment_method = 'PIX' } = req.body;
 
-  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(plan_id) as any;
+  const plan = await db.prepare('SELECT * FROM plans WHERE id = ?').get(plan_id) as any;
   if (!plan) {
     return res.status(404).json({ error: 'Plano não encontrado' });
   }
 
-  const platSettings = db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
+  const platSettings = await db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
 
   // Calculate pricing based on billing cycle
   let amount = plan.price_monthly;
@@ -394,7 +396,7 @@ router.post('/checkout', async (req: AuthRequest, res: Response) => {
   }
 
   const companyId = req.user?.company_id || 1;
-  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
+  const company = await db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
 
   // Generate standard fallback PIX data
   const pixKey = platSettings?.pix_key || '12.345.678/0001-90';
@@ -475,7 +477,7 @@ router.post('/checkout', async (req: AuthRequest, res: Response) => {
     }
   }
 
-  const ins = db.prepare(`
+  const ins = await db.prepare(`
     INSERT INTO subscription_payments (
       company_id, plan_id, plan_name, billing_cycle, amount,
       payment_method, payment_gateway, gateway_payment_id, pix_copia_cola, pix_qrcode, status
@@ -487,7 +489,7 @@ router.post('/checkout', async (req: AuthRequest, res: Response) => {
 
   const paymentId = ins.lastInsertRowid;
 
-  logAudit(req.user!.id, req.user!.name, 'Assinatura', 'Checkout Gerado', `Fatura #${paymentId} gerada para o plano ${plan.name} (${billing_cycle}) no valor de R$ ${amount.toFixed(2)} [${gatewayUsed}]`, Number(paymentId));
+  await logAudit(req.user!.id, req.user!.name, 'Assinatura', 'Checkout Gerado', `Fatura #${paymentId} gerada para o plano ${plan.name} (${billing_cycle}) no valor de R$ ${amount.toFixed(2)} [${gatewayUsed}]`, Number(paymentId));
 
   return res.status(201).json({
     payment_id: paymentId,
@@ -509,7 +511,7 @@ router.post('/checkout', async (req: AuthRequest, res: Response) => {
 router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
   const paymentId = req.params.id;
 
-  const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  const payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
@@ -521,7 +523,7 @@ router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
 
   // Already paid
   if (payment.status === 'paid') {
-    const comp = db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
+    const comp = await db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
     return res.json({
       status: 'paid',
       activated: true,
@@ -530,7 +532,7 @@ router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
     });
   }
 
-  const platSettings = db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
+  const platSettings = await db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
   let isApprovedByGateway = false;
 
   // Check Mercado Pago directly if token available
@@ -569,10 +571,10 @@ router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
 
   // If approved by gateway, activate company immediately
   if (isApprovedByGateway) {
-    const tx = db.transaction(() => {
-      db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(payment.id);
+    const tx = db.transaction(async () => {
+      await db.prepare("UPDATE subscription_payments SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = ?").run(payment.id);
 
-      const company = db.prepare('SELECT access_expires_at FROM companies WHERE id = ?').get(payment.company_id) as any;
+      const company = await db.prepare('SELECT access_expires_at FROM companies WHERE id = ?').get(payment.company_id) as any;
       let baseDate = new Date();
       if (company.access_expires_at && new Date(company.access_expires_at) > baseDate) {
         baseDate = new Date(company.access_expires_at);
@@ -586,18 +588,18 @@ router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
       baseDate.setDate(baseDate.getDate() + daysToAdd);
       const newExpiresAt = baseDate.toISOString();
 
-      db.prepare(`
+      await db.prepare(`
         UPDATE companies
         SET plan_id = ?, plan_name = ?, subscription_status = 'active', access_expires_at = ?
         WHERE id = ?
       `).run(payment.plan_id, payment.plan_name, newExpiresAt, payment.company_id);
 
-      logAudit(req.user!.id, req.user!.name, 'Assinatura', 'Renovação Gateway Aprovada', `Acesso da loja restaurado via gateway ${payment.payment_gateway} até ${baseDate.toLocaleDateString('pt-BR')}`, Number(payment.id));
+      await logAudit(req.user!.id, req.user!.name, 'Assinatura', 'Renovação Gateway Aprovada', `Acesso da loja restaurado via gateway ${payment.payment_gateway} até ${baseDate.toLocaleDateString('pt-BR')}`, Number(payment.id));
 
       return newExpiresAt;
     });
 
-    const newExpiresAt = tx();
+    const newExpiresAt = await tx();
     return res.json({
       status: 'paid',
       activated: true,
@@ -613,10 +615,10 @@ router.get('/check-payment/:id', async (req: AuthRequest, res: Response) => {
 });
 
 // Confirm and activate subscription payment
-router.post('/confirm-payment/:id', (req: AuthRequest, res: Response) => {
+router.post('/confirm-payment/:id', async (req: AuthRequest, res: Response) => {
   const paymentId = req.params.id;
 
-  const payment = db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  const payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
@@ -626,16 +628,16 @@ router.post('/confirm-payment/:id', (req: AuthRequest, res: Response) => {
     return res.status(403).json({ error: 'Acesso negado a esta fatura' });
   }
 
-  const tx = db.transaction(() => {
+  const tx = db.transaction(async () => {
     // 1. Mark payment as paid
-    db.prepare(`
+    await db.prepare(`
       UPDATE subscription_payments
       SET status = 'paid', paid_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(paymentId);
 
     // 2. Calculate new expiration date
-    const company = db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
+    const company = await db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
 
     let baseDate = new Date();
     if (company.access_expires_at && new Date(company.access_expires_at) > baseDate) {
@@ -651,25 +653,25 @@ router.post('/confirm-payment/:id', (req: AuthRequest, res: Response) => {
     const newExpiresAt = baseDate.toISOString();
 
     // 3. Update Company plan & validity
-    db.prepare(`
+    await db.prepare(`
       UPDATE companies
       SET plan_id = ?, plan_name = ?, subscription_status = 'active', access_expires_at = ?
       WHERE id = ?
     `).run(payment.plan_id, payment.plan_name, newExpiresAt, payment.company_id);
 
-    logAudit(req.user!.id, req.user!.name, 'Assinatura', 'Renovação Aprovada', `Acesso da loja renovado com sucesso até ${baseDate.toLocaleDateString('pt-BR')}`, Number(paymentId));
+    await logAudit(req.user!.id, req.user!.name, 'Assinatura', 'Renovação Aprovada', `Acesso da loja renovado com sucesso até ${baseDate.toLocaleDateString('pt-BR')}`, Number(paymentId));
 
     return { success: true, new_expires_at: newExpiresAt, days_added: daysToAdd };
   });
 
-  const result = tx();
+  const result = await tx();
   return res.json(result);
 });
 
 // List past subscription invoices for this company
-router.get('/invoices', (req: AuthRequest, res: Response) => {
+router.get('/invoices', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const invoices = db.prepare(`
+  const invoices = await db.prepare(`
     SELECT * FROM subscription_payments
     WHERE company_id = ?
     ORDER BY id DESC

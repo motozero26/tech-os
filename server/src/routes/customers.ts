@@ -6,7 +6,7 @@ const router = Router();
 router.use(authMiddleware);
 
 // List customers
-router.get('/', (req: AuthRequest, res: Response) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { q, limit = 50 } = req.query;
 
@@ -20,7 +20,7 @@ router.get('/', (req: AuthRequest, res: Response) => {
 
   const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
 
-  const customers = db.prepare(`
+  const customers = await db.prepare(`
     SELECT c.*,
            (SELECT COUNT(*) FROM customer_devices cd WHERE cd.customer_id = c.id) as devices_count,
            (SELECT COUNT(*) FROM service_orders so WHERE so.customer_id = c.id AND so.company_id = c.company_id) as orders_count
@@ -34,7 +34,7 @@ router.get('/', (req: AuthRequest, res: Response) => {
 });
 
 // Create customer
-router.post('/', (req: AuthRequest, res: Response) => {
+router.post('/', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const {
     name, phone, whatsapp, cpf_cnpj, email,
@@ -45,7 +45,7 @@ router.post('/', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'O nome do cliente é obrigatório.' });
   }
 
-  const ins = db.prepare(`
+  const ins = await db.prepare(`
     INSERT INTO customers (
       company_id, name, phone, whatsapp, cpf_cnpj, email,
       zip_code, address, number, complement, neighborhood, city, state, notes
@@ -56,21 +56,21 @@ router.post('/', (req: AuthRequest, res: Response) => {
     neighborhood || null, city || null, state || null, notes || null
   );
 
-  logAudit(req.user!.id, req.user!.name, 'Clientes', 'Cadastro', `Cadastrou o cliente "${name}"`, Number(ins.lastInsertRowid), undefined, companyId);
+  await logAudit(req.user!.id, req.user!.name, 'Clientes', 'Cadastro', `Cadastrou o cliente "${name}"`, Number(ins.lastInsertRowid), undefined, companyId);
 
   return res.status(201).json({ id: ins.lastInsertRowid, name });
 });
 
 // Get customer details
-router.get('/:id', (req: AuthRequest, res: Response) => {
+router.get('/:id', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const customer = db.prepare('SELECT * FROM customers WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
+  const customer = await db.prepare('SELECT * FROM customers WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
   if (!customer) {
     return res.status(404).json({ error: 'Cliente não encontrado' });
   }
 
-  const devices = db.prepare('SELECT * FROM customer_devices WHERE customer_id = ? ORDER BY id DESC').all(req.params.id);
-  const orders = db.prepare(`
+  const devices = await db.prepare('SELECT * FROM customer_devices WHERE customer_id = ? ORDER BY id DESC').all(req.params.id);
+  const orders = await db.prepare(`
     SELECT so.id, so.code, so.status, so.entry_date, so.total_amount,
            cd.model as device_model
     FROM service_orders so
@@ -83,9 +83,9 @@ router.get('/:id', (req: AuthRequest, res: Response) => {
 });
 
 // Add device to customer
-router.post('/:id/devices', (req: AuthRequest, res: Response) => {
+router.post('/:id/devices', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const customer = db.prepare('SELECT id FROM customers WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
+  const customer = await db.prepare('SELECT id FROM customers WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
   if (!customer) {
     return res.status(404).json({ error: 'Cliente não encontrado ou não pertence a esta empresa.' });
   }
@@ -95,7 +95,7 @@ router.post('/:id/devices', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Marca e modelo do aparelho são obrigatórios.' });
   }
 
-  const ins = db.prepare(`
+  const ins = await db.prepare(`
     INSERT INTO customer_devices (
       customer_id, device_type, brand, model, imei_serial, color, unlock_password, notes
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)

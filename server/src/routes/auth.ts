@@ -30,7 +30,7 @@ function recordFailedAttempt(ip: string) {
   }
 }
 
-router.post('/login', (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response) => {
   const clientIp = (req.headers['x-forwarded-for'] as string) || req.socket.remoteAddress || '127.0.0.1';
 
   if (isRateLimited(clientIp)) {
@@ -42,9 +42,9 @@ router.post('/login', (req: Request, res: Response) => {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios' });
   }
 
-  let user = db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(email) as any;
+  let user = await db.prepare('SELECT * FROM users WHERE email = ? AND active = 1').get(email) as any;
   if (!user && (email === 'admin@techos.com.br' || email === 'admin@assistenciashop.com.br')) {
-    user = db.prepare("SELECT * FROM users WHERE email IN ('admin@techos.com.br', 'admin@assistenciashop.com.br') AND active = 1 LIMIT 1").get() as any;
+    user = await db.prepare("SELECT * FROM users WHERE email IN ('admin@techos.com.br', 'admin@assistenciashop.com.br') AND active = 1 LIMIT 1").get() as any;
   }
   if (!user) {
     recordFailedAttempt(clientIp);
@@ -66,7 +66,7 @@ router.post('/login', (req: Request, res: Response) => {
     { expiresIn: '7d', algorithm: 'HS256' }
   );
 
-  logAudit(user.id, user.name, 'Autenticação', 'Login', `Usuário ${user.name} efetuou login no sistema.`, user.id, clientIp, user.company_id || 1);
+  await logAudit(user.id, user.name, 'Autenticação', 'Login', `Usuário ${user.name} efetuou login no sistema.`, user.id, clientIp, user.company_id || 1);
 
   return res.json({
     token,
@@ -80,8 +80,8 @@ router.post('/login', (req: Request, res: Response) => {
   });
 });
 
-router.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
-  const user = db.prepare('SELECT id, name, email, role, commission_rate, active FROM users WHERE id = ?').get(req.user!.id) as any;
+router.get('/me', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const user = await db.prepare('SELECT id, name, email, role, commission_rate, active FROM users WHERE id = ?').get(req.user!.id) as any;
   if (!user) {
     return res.status(404).json({ error: 'Usuário não encontrado' });
   }

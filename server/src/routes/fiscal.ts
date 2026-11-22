@@ -6,8 +6,8 @@ const router = Router();
 router.use(authMiddleware);
 
 // Helper function to check if company has access to Fiscal Module (Plan Ouro Exclusive)
-function checkFiscalAccess(companyId: number): { allowed: boolean; planName: string } {
-  const company = db.prepare(`
+async function checkFiscalAccess(companyId: number): Promise<{ allowed: boolean; planName: string }> {
+  const company = await db.prepare(`
     SELECT c.plan_id, c.plan_name, p.name as plan_title
     FROM companies c
     LEFT JOIN plans p ON p.id = c.plan_id
@@ -20,12 +20,12 @@ function checkFiscalAccess(companyId: number): { allowed: boolean; planName: str
 }
 
 // 1. Status do Módulo Fiscal & Permissões do Plano
-router.get('/status', (req: AuthRequest, res: Response) => {
+router.get('/status', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const { allowed, planName } = checkFiscalAccess(companyId);
+  const { allowed, planName } = await checkFiscalAccess(companyId);
 
-  const settings = db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
-  const totalInvoices = db.prepare('SELECT count(*) as count FROM fiscal_invoices WHERE company_id = ?').get(companyId) as { count: number };
+  const settings = await db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
+  const totalInvoices = await db.prepare('SELECT count(*) as count FROM fiscal_invoices WHERE company_id = ?').get(companyId) as { count: number };
 
   return res.json({
     has_fiscal_access: allowed,
@@ -42,9 +42,9 @@ router.get('/status', (req: AuthRequest, res: Response) => {
 });
 
 // Middleware to enforce Plan Ouro for all operation endpoints below
-function requireGoldPlan(req: AuthRequest, res: Response, next: Function) {
+async function requireGoldPlan(req: AuthRequest, res: Response, next: Function) {
   const companyId = req.user?.company_id || 1;
-  const { allowed, planName } = checkFiscalAccess(companyId);
+  const { allowed, planName } = await checkFiscalAccess(companyId);
   if (!allowed) {
     return res.status(403).json({
       error: 'Recurso Exclusivo: A emissão de Notas Fiscais é exclusiva do Plano Ouro. Faça o upgrade do seu plano para liberar a emissão de NF-e e NFS-e MEI.',
@@ -57,16 +57,16 @@ function requireGoldPlan(req: AuthRequest, res: Response, next: Function) {
 }
 
 // 2. Obter Configurações Fiscais
-router.get('/settings', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.get('/settings', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  let settings = db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
+  let settings = await db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
 
   if (!settings) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO fiscal_settings (company_id, tax_regime, nfe_environment, nfe_series, nfe_next_number, nfce_series, nfce_next_number, is_mei, nfse_series, nfse_next_number)
       VALUES (?, 'mei', 'homologacao', 1, 1, 1, 1, 1, 'E', 1)
     `).run(companyId);
-    settings = db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
+    settings = await db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
   }
 
   // Remove secret password and base64 dump from public response
@@ -82,7 +82,7 @@ router.get('/settings', requireGoldPlan, (req: AuthRequest, res: Response) => {
 });
 
 // 3. Atualizar Configurações Fiscais (Certificado Digital A1 e Emissão MEI)
-router.put('/settings', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.put('/settings', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const {
     tax_regime, nfe_environment,
@@ -94,7 +94,7 @@ router.put('/settings', requireGoldPlan, (req: AuthRequest, res: Response) => {
     service_description_pattern, aliquota_iss
   } = req.body;
 
-  const current = db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
+  const current = await db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
 
   // Process certificate validation & expiration if new certificate is sent
   let certExp = current?.certificate_expiration;
@@ -117,7 +117,7 @@ router.put('/settings', requireGoldPlan, (req: AuthRequest, res: Response) => {
 
   const meiPass = (nfse_mei_password && nfse_mei_password !== '********') ? nfse_mei_password : current?.nfse_mei_password;
 
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO fiscal_settings (
       company_id, tax_regime, nfe_environment,
       certificate_a1_filename, certificate_a1_base64, certificate_password,
@@ -177,13 +177,13 @@ router.put('/settings', requireGoldPlan, (req: AuthRequest, res: Response) => {
     Number(aliquota_iss) || 0.0
   );
 
-  logAudit(req.user!.id, req.user!.name, 'Fiscal', 'Configurações Salvas', 'Atualizou configurações de emissão fiscal (Certificado A1 / NFS-e MEI)');
+  await logAudit(req.user!.id, req.user!.name, 'Fiscal', 'Configurações Salvas', 'Atualizou configurações de emissão fiscal (Certificado A1 / NFS-e MEI)');
 
   return res.json({ success: true, message: 'Configurações fiscais atualizadas com sucesso!' });
 });
 
 // 4. Listar Notas Fiscais Emitidas
-router.get('/invoices', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.get('/invoices', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { type, status, q } = req.query;
 
@@ -206,13 +206,13 @@ router.get('/invoices', requireGoldPlan, (req: AuthRequest, res: Response) => {
   }
 
   const whereSql = whereClauses.join(' AND ');
-  const invoices = db.prepare(`SELECT * FROM fiscal_invoices WHERE ${whereSql} ORDER BY id DESC`).all(...params);
+  const invoices = await db.prepare(`SELECT * FROM fiscal_invoices WHERE ${whereSql} ORDER BY id DESC`).all(...params);
 
   return res.json(invoices);
 });
 
 // 5. Emitir Nota Fiscal (NF-e de Produtos com Certificado A1 ou NFS-e de Serviços MEI sem certificado obrigatório)
-router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.post('/emit', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const {
     invoice_type = 'nfse_service_mei', // 'nfe_product', 'nfce_product', 'nfse_service_mei'
@@ -247,8 +247,8 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
     items = []
   } = req.body;
 
-  const fiscalSettings = db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
-  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
+  const fiscalSettings = await db.prepare('SELECT * FROM fiscal_settings WHERE company_id = ?').get(companyId) as any;
+  const company = await db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
 
   // Validação 1: Para produtos (NF-e / NFC-e), exige Certificado Digital A1
   if (invoice_type === 'nfe_product' || invoice_type === 'nfce_product') {
@@ -347,7 +347,7 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
   let totalServices = 0;
 
   if (reference_type === 'os' && reference_id) {
-    const os = db.prepare(`
+    const os = await db.prepare(`
       SELECT so.*, c.name as c_name, c.cpf_cnpj as c_cpf, c.email as c_email,
              c.phone as c_phone, c.address as c_address, c.number as c_num,
              c.neighborhood as c_neigh, c.zip_code as c_zip, c.city as c_city, c.state as c_state
@@ -373,7 +373,7 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
       totalAmount = os.total_amount || (totalServices + totalProducts);
     }
   } else if (reference_type === 'sale' && reference_id) {
-    const sale = db.prepare(`
+    const sale = await db.prepare(`
       SELECT s.*, c.name as c_name, c.cpf_cnpj as c_cpf, c.email as c_email,
              c.phone as c_phone, c.address as c_address, c.number as c_num,
              c.neighborhood as c_neigh, c.zip_code as c_zip, c.city as c_city, c.state as c_state
@@ -420,16 +420,16 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
   if (invoice_type === 'nfe_product') {
     invoiceNumber = fiscalSettings?.nfe_next_number || 1;
     series = String(fiscalSettings?.nfe_series || '1');
-    db.prepare('UPDATE fiscal_settings SET nfe_next_number = nfe_next_number + 1 WHERE company_id = ?').run(companyId);
+    await db.prepare('UPDATE fiscal_settings SET nfe_next_number = nfe_next_number + 1 WHERE company_id = ?').run(companyId);
   } else if (invoice_type === 'nfce_product') {
     invoiceNumber = fiscalSettings?.nfce_next_number || 1;
     series = String(fiscalSettings?.nfce_series || '1');
-    db.prepare('UPDATE fiscal_settings SET nfce_next_number = nfce_next_number + 1 WHERE company_id = ?').run(companyId);
+    await db.prepare('UPDATE fiscal_settings SET nfce_next_number = nfce_next_number + 1 WHERE company_id = ?').run(companyId);
   } else {
     // NFS-e MEI
     invoiceNumber = fiscalSettings?.nfse_next_number || 1;
     series = String(fiscalSettings?.nfse_series || 'E');
-    db.prepare('UPDATE fiscal_settings SET nfse_next_number = nfse_next_number + 1 WHERE company_id = ?').run(companyId);
+    await db.prepare('UPDATE fiscal_settings SET nfse_next_number = nfse_next_number + 1 WHERE company_id = ?').run(companyId);
   }
 
   // Gerar chave de acesso oficial de 44 dígitos para NF-e ou chave ID Nacional para NFS-e MEI
@@ -668,7 +668,7 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
 </nfeProc>`;
   }
 
-  const ins = db.prepare(`
+  const ins = await db.prepare(`
     INSERT INTO fiscal_invoices (
       company_id, invoice_type, reference_type, reference_id,
       number, series, access_key, protocol, status,
@@ -720,7 +720,7 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
     ? `NFS-e MEI #${invoiceNumber}`
     : (invoice_type === 'nfce_product' ? `NFC-e #${invoiceNumber}` : `NF-e #${invoiceNumber}`);
 
-  logAudit(req.user!.id, req.user!.name, 'Fiscal', 'Nota Emitida', `Emitiu ${typeDesc} no valor de R$ ${totalAmount.toFixed(2)} (Chave: ${accessKey})`, Number(invoiceId));
+  await logAudit(req.user!.id, req.user!.name, 'Fiscal', 'Nota Emitida', `Emitiu ${typeDesc} no valor de R$ ${totalAmount.toFixed(2)} (Chave: ${accessKey})`, Number(invoiceId));
 
   return res.status(201).json({
     id: invoiceId,
@@ -739,7 +739,7 @@ router.post('/emit', requireGoldPlan, (req: AuthRequest, res: Response) => {
 });
 
 // 6. Cancelar Nota Fiscal Autorizada
-router.post('/invoices/:id/cancel', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.post('/invoices/:id/cancel', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const invoiceId = req.params.id;
   const { reason } = req.body;
@@ -748,7 +748,7 @@ router.post('/invoices/:id/cancel', requireGoldPlan, (req: AuthRequest, res: Res
     return res.status(400).json({ error: 'A justificativa de cancelamento deve conter no mínimo 15 caracteres conforme exigência legal da SEFAZ/Receita Federal.' });
   }
 
-  const invoice = db.prepare('SELECT * FROM fiscal_invoices WHERE id = ? AND company_id = ?').get(invoiceId, companyId) as any;
+  const invoice = await db.prepare('SELECT * FROM fiscal_invoices WHERE id = ? AND company_id = ?').get(invoiceId, companyId) as any;
   if (!invoice) {
     return res.status(404).json({ error: 'Nota fiscal não encontrada.' });
   }
@@ -757,21 +757,21 @@ router.post('/invoices/:id/cancel', requireGoldPlan, (req: AuthRequest, res: Res
     return res.status(400).json({ error: 'Esta nota fiscal já foi cancelada anteriormente.' });
   }
 
-  db.prepare(`
+  await db.prepare(`
     UPDATE fiscal_invoices
     SET status = 'canceled', cancel_reason = ?, canceled_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(reason, invoiceId);
 
-  logAudit(req.user!.id, req.user!.name, 'Fiscal', 'Nota Cancelada', `Cancelou Nota #${invoice.number} (${invoice.invoice_type}). Motivo: ${reason}`, Number(invoiceId));
+  await logAudit(req.user!.id, req.user!.name, 'Fiscal', 'Nota Cancelada', `Cancelou Nota #${invoice.number} (${invoice.invoice_type}). Motivo: ${reason}`, Number(invoiceId));
 
   return res.json({ success: true, message: 'Nota fiscal cancelada com sucesso na SEFAZ!' });
 });
 
 // 7. Visualização de Dados do DANFE / DANFSE
-router.get('/invoices/:id/danfe', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.get('/invoices/:id/danfe', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const invoice = db.prepare('SELECT * FROM fiscal_invoices WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
+  const invoice = await db.prepare('SELECT * FROM fiscal_invoices WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
 
   if (!invoice) {
     return res.status(404).json({ error: 'Nota fiscal não encontrada.' });
@@ -786,7 +786,7 @@ router.get('/invoices/:id/danfe', requireGoldPlan, (req: AuthRequest, res: Respo
     }
   }
 
-  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
+  const company = await db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as any;
 
   return res.json({
     invoice: {
@@ -807,9 +807,9 @@ router.get('/invoices/:id/danfe', requireGoldPlan, (req: AuthRequest, res: Respo
 });
 
 // 8. Download do XML da Nota Fiscal
-router.get('/invoices/:id/xml', requireGoldPlan, (req: AuthRequest, res: Response) => {
+router.get('/invoices/:id/xml', requireGoldPlan, async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
-  const invoice = db.prepare('SELECT * FROM fiscal_invoices WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
+  const invoice = await db.prepare('SELECT * FROM fiscal_invoices WHERE id = ? AND company_id = ?').get(req.params.id, companyId) as any;
 
   if (!invoice) {
     return res.status(404).json({ error: 'Nota fiscal não encontrada.' });

@@ -6,7 +6,7 @@ const router = Router();
 router.use(authMiddleware);
 
 // List pre-owned devices
-router.get('/', (req: AuthRequest, res: Response) => {
+router.get('/', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const { status } = req.query;
   const whereClauses: string[] = ['udt.company_id = ?'];
@@ -19,7 +19,7 @@ router.get('/', (req: AuthRequest, res: Response) => {
 
   const whereSql = `WHERE ${whereClauses.join(' AND ')}`;
 
-  const devices = db.prepare(`
+  const devices = await db.prepare(`
     SELECT udt.*, c.name as customer_name, c.phone as customer_phone, c.cpf_cnpj as customer_cpf
     FROM used_device_trades udt
     JOIN customers c ON c.id = udt.customer_id
@@ -31,7 +31,7 @@ router.get('/', (req: AuthRequest, res: Response) => {
 });
 
 // Purchase used device from customer
-router.post('/purchase', (req: AuthRequest, res: Response) => {
+router.post('/purchase', async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id || 1;
   const {
     customer_id, customer_name, customer_phone, customer_cpf,
@@ -43,17 +43,17 @@ router.post('/purchase', (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Marca, modelo, IMEI e valor de compra são obrigatórios.' });
   }
 
-  const openSession = db.prepare("SELECT * FROM cash_sessions WHERE status = 'open' AND company_id = ? ORDER BY id DESC LIMIT 1").get(companyId) as any;
+  const openSession = await db.prepare("SELECT * FROM cash_sessions WHERE status = 'open' AND company_id = ? ORDER BY id DESC LIMIT 1").get(companyId) as any;
   if (!openSession) {
     return res.status(400).json({ error: 'O caixa precisa estar aberto para registrar a compra de seminovo.' });
   }
 
-  const buyTx = db.transaction(() => {
+  const buyTx = db.transaction(async () => {
     // 1. Resolve Customer
     let resolvedCustomerId = customer_id;
     if (!resolvedCustomerId) {
       if (!customer_name) throw new Error('Nome do cliente é obrigatório');
-      const newCust = db.prepare(`
+      const newCust = await db.prepare(`
         INSERT INTO customers (company_id, name, phone, cpf_cnpj)
         VALUES (?, ?, ?, ?)
       `).run(companyId, customer_name, customer_phone || null, customer_cpf || null);
@@ -63,7 +63,7 @@ router.post('/purchase', (req: AuthRequest, res: Response) => {
     const numPrice = Number(purchase_price);
 
     // 2. Insert trade record
-    const ins = db.prepare(`
+    const ins = await db.prepare(`
       INSERT INTO used_device_trades (
         company_id, type, session_id, user_id, customer_id, brand, model,
         imei_serial, color, condition_grade, price, status, notes
@@ -76,7 +76,7 @@ router.post('/purchase', (req: AuthRequest, res: Response) => {
     const tradeId = ins.lastInsertRowid;
 
     // 3. Register cash transaction (bleed / out)
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO cash_transactions (
         session_id, user_id, type, amount, payment_method,
         reference_type, reference_id, description
@@ -88,7 +88,7 @@ router.post('/purchase', (req: AuthRequest, res: Response) => {
 
     // 4. Optionally insert into products inventory as well
     if (expected_sale_price) {
-      db.prepare(`
+      await db.prepare(`
         INSERT INTO products (
           company_id, name, sku, cost_price, sale_price, stock_quantity, min_stock, is_part
         ) VALUES (?, ?, ?, ?, ?, 1, 0, 0)
@@ -101,13 +101,13 @@ router.post('/purchase', (req: AuthRequest, res: Response) => {
       );
     }
 
-    logAudit(req.user!.id, req.user!.name, 'Caixa', 'Compra de Seminovo', `Comprou ${brand} ${model} por R$ ${numPrice.toFixed(2)}`, Number(tradeId), undefined, companyId);
+    await logAudit(req.user!.id, req.user!.name, 'Caixa', 'Compra de Seminovo', `Comprou ${brand} ${model} por R$ ${numPrice.toFixed(2)}`, Number(tradeId), undefined, companyId);
 
     return tradeId;
   });
 
   try {
-    const tradeId = buyTx();
+    const tradeId = await buyTx();
     return res.status(201).json({ success: true, tradeId });
   } catch (err: any) {
     return res.status(400).json({ error: err.message || 'Erro ao registrar compra de seminovo' });

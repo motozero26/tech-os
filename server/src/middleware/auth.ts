@@ -14,7 +14,7 @@ export interface AuthRequest extends Request {
   };
 }
 
-export function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
+export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({ error: 'Token de autenticação não fornecido' });
@@ -35,8 +35,9 @@ export function authMiddleware(req: AuthRequest, res: Response, next: NextFuncti
                          path.includes('/saas');
 
         if (!isExempt) {
-          const companyId = req.user.company_id || (db.prepare('SELECT company_id FROM users WHERE id = ?').get(req.user.id) as any)?.company_id || 1;
-          const company = db.prepare('SELECT id, subscription_status, access_expires_at FROM companies WHERE id = ?').get(companyId) as any;
+          const userRecord = (await db.prepare('SELECT company_id FROM users WHERE id = ?').get(req.user.id)) as any;
+          const companyId = req.user.company_id || userRecord?.company_id || 1;
+          const company = (await db.prepare('SELECT id, subscription_status, access_expires_at FROM companies WHERE id = ?').get(companyId)) as any;
           if (company) {
             const now = new Date();
             const expiresAt = company.access_expires_at ? new Date(company.access_expires_at) : null;
@@ -71,9 +72,9 @@ export function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFun
   next();
 }
 
-export function logAudit(userId: number | null, userName: string | null, module: string, action: string, description: string, entityId?: number, ip?: string, companyId?: number) {
+export async function logAudit(userId: number | null, userName: string | null, module: string, action: string, description: string, entityId?: number, ip?: string, companyId?: number) {
   try {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO audit_logs (company_id, user_id, user_name, module, action, description, entity_id, ip_address)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(companyId || 1, userId || null, userName || 'Sistema', module, action, description, entityId || null, ip || '127.0.0.1');

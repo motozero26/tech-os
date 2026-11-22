@@ -5,11 +5,11 @@ import { Worker } from 'worker_threads';
 
 export interface DbInterface {
   prepare(sql: string): {
-    all(...params: any[]): any[];
+    all(...params: any[]): any;
     get(...params: any[]): any;
-    run(...params: any[]): { lastInsertRowid: number | bigint; changes: number };
+    run(...params: any[]): any;
   };
-  exec(sql: string): void;
+  exec(sql: string): any;
   pragma(sql: string, options?: any): any;
   transaction<T extends (...args: any[]) => any>(fn: T): T;
 }
@@ -20,173 +20,50 @@ const isPostgres = Boolean(connectionString);
 let dbInstance: DbInterface;
 
 if (isPostgres) {
-  console.log('[TechOS Database] Configurando adaptador nativo para Supabase PostgreSQL...');
-  const BUFFER_SIZE = 32 * 1024 * 1024; // 32MB SharedArrayBuffer
-  const sab = new SharedArrayBuffer(BUFFER_SIZE);
-  const ctrl = new Int32Array(sab, 0, 4);
-  const dataBuf = new Uint8Array(sab, 16);
+  console.log('[TechOS Database] Inicializando conexão nativa não-bloqueante com Supabase PostgreSQL...');
+  const { Pool } = require('pg');
 
-  const workerCode = `
-    const { workerData, parentPort } = require('worker_threads');
-    const { Pool } = require('pg');
+  let sslConfig: any = false;
+  const conn = connectionString || '';
+  if (conn.includes('supabase') || conn.includes('pooler') || conn.includes('sslmode=require')) {
+    sslConfig = { rejectUnauthorized: false };
+  }
 
-    let sslConfig = false;
-    const conn = workerData.connectionString || '';
-    if (conn.includes('supabase') || conn.includes('pooler') || conn.includes('sslmode=require')) {
-      sslConfig = { rejectUnauthorized: false };
-    }
+  const pool = new Pool({
+    connectionString: conn,
+    ssl: sslConfig,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
 
-    const pool = new Pool({
-      connectionString: conn,
-      ssl: sslConfig,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
+  function adaptSql(sql: string, type: string): string {
+    let out = sql.replace(/strftime\s*\(\s*'%Y-%m'\s*,\s*([^)]+)\)/gi, "TO_CHAR($1, 'YYYY-MM')");
+    out = out.replace(/strftime\s*\(\s*'%Y-%m-%d'\s*,\s*([^)]+)\)/gi, "TO_CHAR($1, 'YYYY-MM-DD')");
+    out = out.replace(/strftime\s*\(\s*'%Y'\s*,\s*([^)]+)\)/gi, "TO_CHAR($1, 'YYYY')");
+    out = out.replace(/datetime\s*\(\s*'now'\s*\)/gi, 'NOW()');
 
-    const sab = workerData.sab;
-    const ctrl = new Int32Array(sab, 0, 4);
-    const dataBuf = new Uint8Array(sab, 16);
-
-    function adaptSql(sql, type) {
-      let out = sql.replace(/strftime\\s*\\(\\s*'%Y-%m'\\s*,\\s*([^)]+)\\)/gi, "TO_CHAR($1, 'YYYY-MM')");
-      out = out.replace(/strftime\\s*\\(\\s*'%Y-%m-%d'\\s*,\\s*([^)]+)\\)/gi, "TO_CHAR($1, 'YYYY-MM-DD')");
-      out = out.replace(/strftime\\s*\\(\\s*'%Y'\\s*,\\s*([^)]+)\\)/gi, "TO_CHAR($1, 'YYYY')");
-      out = out.replace(/datetime\\s*\\(\\s*'now'\\s*\\)/gi, 'NOW()');
-
-      let paramIndex = 1;
-      let inString = false;
-      let converted = '';
-      for (let i = 0; i < out.length; i++) {
-        const ch = out[i];
-        if (ch === "'") {
-          inString = !inString;
-          converted += ch;
-        } else if (ch === '?' && !inString) {
-          converted += '$' + (paramIndex++);
-        } else {
-          converted += ch;
-        }
+    let paramIndex = 1;
+    let inString = false;
+    let converted = '';
+    for (let i = 0; i < out.length; i++) {
+      const ch = out[i];
+      if (ch === "'") {
+        inString = !inString;
+        converted += ch;
+      } else if (ch === '?' && !inString) {
+        converted += `$${paramIndex++}`;
+      } else {
+        converted += ch;
       }
-      out = converted;
+    }
+    out = converted;
 
-      if (type === 'run' && /^\\s*INSERT\\s+INTO/i.test(out) && !/\\bRETURNING\\b/i.test(out)) {
-        out += ' RETURNING id';
-      }
-
-      return out;
+    if (type === 'run' && /^\s*INSERT\s+INTO/i.test(out) && !/\bRETURNING\b/i.test(out)) {
+      out += ' RETURNING id';
     }
 
-    async function handleQuery(req) {
-      const { type, sql, params } = req;
-      const pgSql = adaptSql(sql, type);
-      const cleanParams = (params || []).map(p => p === undefined ? null : p);
-
-      if (type === 'exec') {
-        await pool.query(pgSql);
-        return { rows: [], lastInsertRowid: 0, changes: 0 };
-      }
-
-      const res = await pool.query(pgSql, cleanParams);
-
-      if (type === 'run') {
-        const firstRow = res.rows && res.rows[0];
-        const lastId = firstRow && firstRow.id !== undefined ? Number(firstRow.id) : 0;
-        return {
-          rows: [],
-          lastInsertRowid: lastId,
-          changes: res.rowCount || 0
-        };
-      }
-
-      return {
-        rows: res.rows || [],
-        lastInsertRowid: 0,
-        changes: res.rowCount || 0
-      };
-    }
-
-    function loop() {
-      while (true) {
-        if (Atomics.load(ctrl, 0) === 1) break;
-        Atomics.wait(ctrl, 0, 0);
-      }
-
-      const len = Atomics.load(ctrl, 1);
-      const jsonStr = Buffer.from(dataBuf.buffer, 16, len).toString('utf8');
-      const req = JSON.parse(jsonStr);
-
-      handleQuery(req)
-        .then((result) => {
-          ctrl[2] = result.lastInsertRowid || 0;
-          ctrl[3] = result.changes || 0;
-          const resBuf = Buffer.from(JSON.stringify(result.rows || []), 'utf8');
-          if (resBuf.length > dataBuf.length) {
-            throw new Error('Resultado da consulta excede o tamanho do buffer de memória');
-          }
-          resBuf.copy(dataBuf);
-          Atomics.store(ctrl, 1, resBuf.length);
-          Atomics.store(ctrl, 0, 2); // RESPONSE_OK
-          Atomics.notify(ctrl, 0, 1);
-        })
-        .catch((err) => {
-          const errBuf = Buffer.from(JSON.stringify({ message: err.message, code: err.code }), 'utf8');
-          errBuf.copy(dataBuf);
-          Atomics.store(ctrl, 1, errBuf.length);
-          Atomics.store(ctrl, 0, 3); // RESPONSE_ERROR
-          Atomics.notify(ctrl, 0, 1);
-        })
-        .finally(() => {
-          setImmediate(loop);
-        });
-    }
-
-    // Signal ready
-    Atomics.store(ctrl, 0, 4);
-    Atomics.notify(ctrl, 0, 1);
-    loop();
-  `;
-
-  new Worker(workerCode, { eval: true, workerData: { sab, connectionString } });
-  // Wait for worker ready
-  Atomics.wait(ctrl, 0, 0, 5000);
-  Atomics.store(ctrl, 0, 0); // Reset to IDLE
-
-  function executeRaw(type: string, sql: string, params: any[] = []): { rows: any[]; lastInsertRowid: number; changes: number } {
-    const cleanParams = (params || []).map(p => p === undefined ? null : p);
-    const reqObj = { type, sql, params: cleanParams };
-    const reqBuf = Buffer.from(JSON.stringify(reqObj), 'utf8');
-
-    if (reqBuf.length > dataBuf.length) {
-      throw new Error('Payload da consulta excede a capacidade do buffer');
-    }
-
-    reqBuf.copy(dataBuf);
-    Atomics.store(ctrl, 1, reqBuf.length);
-    Atomics.store(ctrl, 0, 1); // REQUEST_PENDING
-    Atomics.notify(ctrl, 0, 1);
-
-    const waitRes = Atomics.wait(ctrl, 0, 1, 30000);
-    if (waitRes === 'timed-out') {
-      Atomics.store(ctrl, 0, 0);
-      throw new Error('Tempo limite excedido na consulta do banco de dados (30s)');
-    }
-
-    const status = Atomics.load(ctrl, 0);
-    const len = Atomics.load(ctrl, 1);
-    const jsonStr = Buffer.from(dataBuf.buffer, 16, len).toString('utf8');
-    Atomics.store(ctrl, 0, 0); // Reset to IDLE
-
-    if (status === 3) {
-      const errObj = JSON.parse(jsonStr);
-      throw new Error(errObj.message || 'Erro de banco de dados');
-    }
-
-    return {
-      rows: JSON.parse(jsonStr),
-      lastInsertRowid: Atomics.load(ctrl, 2),
-      changes: Atomics.load(ctrl, 3)
-    };
+    return out;
   }
 
   function flattenParams(params: any[]): any[] {
@@ -196,21 +73,50 @@ if (isPostgres) {
     return params || [];
   }
 
+  async function executePg(type: string, sql: string, params: any[] = []) {
+    const pgSql = adaptSql(sql, type);
+    const cleanParams = (params || []).map(p => p === undefined ? null : p);
+
+    if (type === 'exec') {
+      await pool.query(pgSql);
+      return { rows: [], lastInsertRowid: 0, changes: 0 };
+    }
+
+    const res = await pool.query(pgSql, cleanParams);
+
+    if (type === 'run') {
+      const firstRow = res.rows && res.rows[0];
+      const lastId = firstRow && firstRow.id !== undefined ? Number(firstRow.id) : 0;
+      return {
+        rows: [],
+        lastInsertRowid: lastId,
+        changes: res.rowCount || 0
+      };
+    }
+
+    return {
+      rows: res.rows || [],
+      lastInsertRowid: 0,
+      changes: res.rowCount || 0
+    };
+  }
+
   dbInstance = {
     prepare(sql: string) {
       return {
-        all(...params: any[]) {
+        async all(...params: any[]) {
           const p = flattenParams(params);
-          return executeRaw('all', sql, p).rows;
+          const res = await executePg('all', sql, p);
+          return res.rows;
         },
-        get(...params: any[]) {
+        async get(...params: any[]) {
           const p = flattenParams(params);
-          const res = executeRaw('get', sql, p).rows;
-          return res.length > 0 ? res[0] : undefined;
+          const res = await executePg('get', sql, p);
+          return (res.rows as any[]).length > 0 ? (res.rows as any[])[0] : undefined;
         },
-        run(...params: any[]) {
+        async run(...params: any[]) {
           const p = flattenParams(params);
-          const res = executeRaw('run', sql, p);
+          const res = await executePg('run', sql, p);
           return {
             lastInsertRowid: res.lastInsertRowid,
             changes: res.changes
@@ -218,24 +124,24 @@ if (isPostgres) {
         }
       };
     },
-    exec(sql: string) {
-      executeRaw('exec', sql);
+    async exec(sql: string) {
+      await executePg('exec', sql);
     },
     pragma(_cmd: string) {
       return [];
     },
     transaction<T extends (...args: any[]) => any>(fn: T): T {
-      return function (...args: any[]) {
-        executeRaw('exec', 'BEGIN');
+      return async function (...args: any[]) {
+        await executePg('exec', 'BEGIN');
         try {
-          const result = fn(...args);
-          executeRaw('exec', 'COMMIT');
+          const result = await fn(...args);
+          await executePg('exec', 'COMMIT');
           return result;
         } catch (err) {
-          executeRaw('exec', 'ROLLBACK');
+          await executePg('exec', 'ROLLBACK');
           throw err;
         }
-      } as T;
+      } as unknown as T;
     }
   };
 } else {
@@ -257,11 +163,11 @@ if (isPostgres) {
 
 export const db: DbInterface = dbInstance;
 
-export function initDatabase() {
+export async function initDatabase() {
   if (isPostgres) {
     try {
       console.log('[TechOS Database] Verificando tabelas no Supabase PostgreSQL...');
-      const plansCount = db.prepare('SELECT count(*) as count FROM plans').get() as any;
+      const plansCount = (await db.prepare('SELECT count(*) as count FROM plans').get()) as any;
       console.log(`[TechOS Database] Supabase PostgreSQL conectado com sucesso! Planos cadastrados: ${plansCount?.count ?? 0}`);
     } catch (err: any) {
       console.error('[TechOS Database] Aviso de conexão com Supabase:', err.message);

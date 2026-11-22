@@ -9,8 +9,8 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, selectedPlan }) => {
-  const [email, setEmail] = useState('admin@techos.com.br');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -116,10 +116,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, s
             <ArrowRight className="w-4 h-4" />
           </button>
         </form>
-
-        <div className="mt-6 pt-6 border-t border-slate-800/80 text-center text-xs text-slate-500">
-          Acesso padrão demo: <span className="text-slate-400 font-mono">admin@techos.com.br</span> / <span className="text-slate-400 font-mono">admin123</span>
-        </div>
       </div>
     </div>
   );
