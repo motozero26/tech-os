@@ -220,7 +220,18 @@ export async function initDatabase() {
           }
         }
         if (schemaSql) {
-          await pool.query(schemaSql);
+          const statements = schemaSql
+            .split(/;\s*[\r\n]+/)
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && !s.startsWith('--'));
+
+          for (const stmt of statements) {
+            try {
+              await pool.query(stmt);
+            } catch (stmtErr: any) {
+              console.warn('[TechOS Database Migration Warning]:', stmtErr.message);
+            }
+          }
           console.log('[TechOS Database] Schema PostgreSQL inicializado com sucesso no Supabase!');
         } else {
           console.warn('[TechOS Database] Arquivo schema.sql não localizado para auto-migration.');

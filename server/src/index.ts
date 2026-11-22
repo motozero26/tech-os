@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { initDatabase, db, isPostgres, getEffectiveConnectionString } from './db.js';
+import { initDatabase, db, isPostgres, pool, getEffectiveConnectionString } from './db.js';
 
 import authRouter from './routes/auth.js';
 import dashboardRouter from './routes/dashboard.js';
@@ -78,7 +78,16 @@ app.get('/api/health', async (req, res) => {
   try {
     const start = Date.now();
     const testRes = await Promise.race([
-      db.prepare('SELECT 1 as connected').get(),
+      (async () => {
+        const ping = await db.prepare('SELECT 1 as connected').get();
+        const reg = await pool.query("SELECT to_regclass('public.plans') as tbl");
+        let count = 0;
+        if (reg.rows[0]?.tbl) {
+          const c = await pool.query("SELECT count(*) as count FROM plans");
+          count = Number(c.rows[0]?.count);
+        }
+        return { ping, has_plans_table: Boolean(reg.rows[0]?.tbl), plans_count: count };
+      })(),
       new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout (3000ms)')), 3000))
     ]);
     dbTest = { status: 'connected', latency_ms: Date.now() - start, result: testRes };
