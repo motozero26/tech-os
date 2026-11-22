@@ -54,13 +54,13 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
   const platSettings = await db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
 
   // Calculate pricing based on billing cycle
-  let amount = plan.price_monthly;
+  let amount = Number(plan.price_monthly);
   if (billing_cycle === 'quarterly') {
-    amount = (plan.price_monthly * 3) * 0.95;
+    amount = (amount * 3) * 0.95;
   } else if (billing_cycle === 'semiannual') {
-    amount = (plan.price_monthly * 6) * 0.90;
+    amount = (amount * 6) * 0.90;
   } else if (billing_cycle === 'annual') {
-    amount = plan.price_yearly || ((plan.price_monthly * 12) * 0.80);
+    amount = Number(plan.price_yearly) || ((amount * 12) * 0.80);
   }
 
   const companyCode = Math.random().toString(36).substring(2, 10);
@@ -389,17 +389,17 @@ router.post('/checkout', async (req: AuthRequest, res: Response) => {
   const platSettings = await db.prepare('SELECT * FROM platform_settings WHERE id = 1').get() as any;
 
   // Calculate pricing based on billing cycle
-  let amount = plan.price_monthly;
+  let amount = Number(plan.price_monthly);
   let monthsToAdd = 1;
 
   if (billing_cycle === 'quarterly') {
-    amount = (plan.price_monthly * 3) * 0.95; // 5% discount
+    amount = (amount * 3) * 0.95; // 5% discount
     monthsToAdd = 3;
   } else if (billing_cycle === 'semiannual') {
-    amount = (plan.price_monthly * 6) * 0.90; // 10% discount
+    amount = (amount * 6) * 0.90; // 10% discount
     monthsToAdd = 6;
   } else if (billing_cycle === 'annual') {
-    amount = plan.price_yearly || ((plan.price_monthly * 12) * 0.80); // 20% discount
+    amount = Number(plan.price_yearly) || ((amount * 12) * 0.80); // 20% discount
     monthsToAdd = 12;
   }
 

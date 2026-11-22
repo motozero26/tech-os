@@ -39,7 +39,11 @@ const txStorage = new AsyncLocalStorage<any>();
 
 if (isPostgres) {
   console.log('[TechOS Database] Inicializando conexão nativa não-bloqueante com Supabase PostgreSQL...');
-  const { Pool } = require('pg');
+  const { Pool, types } = require('pg');
+
+  // Parse PostgreSQL NUMERIC/DECIMAL as float (like SQLite) to avoid string issues with toFixed
+  types.setTypeParser(1700, (val: string) => parseFloat(val));
+  types.setTypeParser(20, (val: string) => parseInt(val, 10)); // int8/bigint as integer
 
   const conn = connectionString || '';
   if (conn.includes('supabase') || conn.includes('pooler')) {
