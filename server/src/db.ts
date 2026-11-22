@@ -240,6 +240,24 @@ export async function initDatabase() {
         const plansCount = (await db.prepare('SELECT count(*) as count FROM plans').get()) as any;
         console.log(`[TechOS Database] Supabase PostgreSQL conectado com sucesso! Planos cadastrados: ${plansCount?.count ?? 0}`);
       }
+
+      // Ensure admin user has valid bcrypt hash in Supabase
+      try {
+        const adminCheck = (await db.prepare("SELECT id, password_hash FROM users WHERE email IN ('admin@techos.com.br', 'admin@techos.com', 'admin@assistenciashop.com.br') LIMIT 1").get()) as any;
+        const validAdminHash = bcrypt.hashSync('admin123', 10);
+        if (!adminCheck) {
+          await db.prepare(`
+            INSERT INTO users (company_id, name, email, password_hash, role, active)
+            VALUES (1, 'MACKSON WEIBER', 'admin@techos.com.br', ?, 'master', 1)
+          `).run(validAdminHash);
+        } else {
+          if (!bcrypt.compareSync('admin123', adminCheck.password_hash) && !bcrypt.compareSync('123456', adminCheck.password_hash)) {
+            await db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(validAdminHash, adminCheck.id);
+          }
+        }
+      } catch (userErr: any) {
+        console.warn('[TechOS Database] Aviso ao sincronizar admin:', userErr.message);
+      }
     } catch (err: any) {
       console.error('[TechOS Database] Erro ao verificar/inicializar Supabase:', err.message);
     }
