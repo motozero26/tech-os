@@ -46,7 +46,7 @@ if (isPostgres) {
     process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   }
 
-  const cleanConn = conn.replace(/[?&]sslmode=[^&]+/g, '').replace(/\?&/, '?').replace(/[?&]$/, '');
+  const cleanConn = conn.replace(/([?&])sslmode=[^&]+(&|$)/, (m, p1, p2) => (p2 === '&' ? p1 : '')).replace(/[?&]$/, '');
 
   pool = new Pool({
     connectionString: cleanConn,
