@@ -38,18 +38,26 @@ async function request<T = any>(endpoint: string, options: RequestInit = {}): Pr
     headers,
   });
 
-  if (response.status === 401) {
-    removeAuthToken();
-    window.location.href = '/login';
-    throw new Error('Sessão expirada');
+  let data: any = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = { error: response.statusText || 'Erro na comunicação com o servidor' };
   }
 
-  const data = await response.json();
+  if (response.status === 401 && !endpoint.includes('/auth/login')) {
+    removeAuthToken();
+    if (window.location.pathname !== '/login' && window.location.hash !== '#login') {
+      window.location.href = '/login';
+    }
+    throw new Error(data?.error || 'Sessão expirada');
+  }
+
   if (!response.ok) {
-    if (data.code === 'SUBSCRIPTION_OVERDUE') {
+    if (data?.code === 'SUBSCRIPTION_OVERDUE') {
       window.dispatchEvent(new CustomEvent('subscription_overdue_blocked', { detail: data }));
     }
-    throw new Error(data.error || 'Ocorreu um erro na requisição');
+    throw new Error(data?.error || 'Ocorreu um erro na requisição');
   }
 
   return data as T;

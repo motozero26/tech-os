@@ -107,11 +107,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
 
   // Auto-polling para validação do pagamento em tempo real
   useEffect(() => {
-    if (checkoutStep !== 'payment' || !checkoutResult?.payment_id) return;
+    if (checkoutStep !== 'payment' || (!checkoutResult?.gateway_payment_id && !checkoutResult?.payment_id)) return;
 
+    const paymentRef = checkoutResult.gateway_payment_id || checkoutResult.payment_id;
     const interval = setInterval(async () => {
       try {
-        const check = await api.checkPublicPayment(checkoutResult.payment_id);
+        const check = await api.checkPublicPayment(paymentRef);
         if (check.status === 'paid' && check.activated) {
           clearInterval(interval);
           handlePaymentApproved(check);
@@ -191,10 +192,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
   }
 
   async function handleSimulateApproval() {
-    if (!checkoutResult?.payment_id) return;
+    const paymentRef = checkoutResult?.gateway_payment_id || checkoutResult?.payment_id;
+    if (!paymentRef) return;
     setCheckingPayment(true);
     try {
-      const res = await api.confirmPublicPayment(checkoutResult.payment_id);
+      const res = await api.confirmPublicPayment(paymentRef);
       if (res.status === 'paid' && res.activated) {
         handlePaymentApproved(res);
       }
@@ -1038,7 +1040,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onGoToLogin, onLoginSu
       </section>
 
       {/* 4. SHOWCASE MODULAR COM SCROLL REVEAL E 3D TILT (AO DESCER A PÁGINA) */}
-      <section className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <section id="como-funciona" className="py-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center max-w-3xl mx-auto mb-16">
           <span className="text-xs font-extrabold text-blue-400 tracking-wider uppercase">
             Engenharia de Ponta

@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
-import { Worker } from 'worker_threads';
+import { AsyncLocalStorage } from 'async_hooks';
 
 export interface DbInterface {
   prepare(sql: string): {
@@ -14,10 +14,28 @@ export interface DbInterface {
   transaction<T extends (...args: any[]) => any>(fn: T): T;
 }
 
-const connectionString = process.env.POSTGRES_URL || process.env.DATABASE_URL;
+export function getEffectiveConnectionString(): string | undefined {
+  const candidates = [
+    process.env.POSTGRES_PRISMA_URL,
+    process.env.POSTGRES_URL,
+    process.env.DATABASE_URL,
+    process.env.SUPABASE_DATABASE_URL,
+    process.env.POSTGRES_URL_NON_POOLING
+  ].filter(Boolean) as string[];
+
+  // Prioritize pooler URL (IPv4 compatible with Vercel Serverless Functions)
+  const pooler = candidates.find(c => c.includes('pooler.supabase.com'));
+  if (pooler) return pooler;
+
+  return candidates[0];
+}
+
+const connectionString = getEffectiveConnectionString();
 const isPostgres = Boolean(connectionString);
 
 let dbInstance: DbInterface;
+let pool: any = null;
+const txStorage = new AsyncLocalStorage<any>();
 
 if (isPostgres) {
   console.log('[TechOS Database] Inicializando conexão nativa não-bloqueante com Supabase PostgreSQL...');
@@ -25,16 +43,22 @@ if (isPostgres) {
 
   let sslConfig: any = false;
   const conn = connectionString || '';
-  if (conn.includes('supabase') || conn.includes('pooler') || conn.includes('sslmode=require')) {
+  if (conn.includes('supabase') || conn.includes('pooler') || conn.includes('sslmode=require') || conn.includes('sslmode=')) {
     sslConfig = { rejectUnauthorized: false };
   }
 
-  const pool = new Pool({
+  pool = new Pool({
     connectionString: conn,
     ssl: sslConfig,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 10000,
+    max: 2,
+    idleTimeoutMillis: 10000,
+    connectionTimeoutMillis: 4000,
+    query_timeout: 6000,
+    statement_timeout: 6000,
+  });
+
+  pool.on('error', (err: any) => {
+    console.error('[TechOS Database] Erro capturado no pool do PostgreSQL:', err?.message || err);
   });
 
   function adaptSql(sql: string, type: string): string {
@@ -77,12 +101,14 @@ if (isPostgres) {
     const pgSql = adaptSql(sql, type);
     const cleanParams = (params || []).map(p => p === undefined ? null : p);
 
+    const client = txStorage.getStore() || pool;
+
     if (type === 'exec') {
-      await pool.query(pgSql);
+      await client.query(pgSql);
       return { rows: [], lastInsertRowid: 0, changes: 0 };
     }
 
-    const res = await pool.query(pgSql, cleanParams);
+    const res = await client.query(pgSql, cleanParams);
 
     if (type === 'run') {
       const firstRow = res.rows && res.rows[0];
@@ -132,14 +158,19 @@ if (isPostgres) {
     },
     transaction<T extends (...args: any[]) => any>(fn: T): T {
       return async function (...args: any[]) {
-        await executePg('exec', 'BEGIN');
+        const client = await pool.connect();
         try {
-          const result = await fn(...args);
-          await executePg('exec', 'COMMIT');
+          await client.query('BEGIN');
+          const result = await txStorage.run(client, async () => {
+            return await fn(...args);
+          });
+          await client.query('COMMIT');
           return result;
         } catch (err) {
-          await executePg('exec', 'ROLLBACK');
+          try { await client.query('ROLLBACK'); } catch {}
           throw err;
+        } finally {
+          client.release();
         }
       } as unknown as T;
     }
@@ -162,15 +193,39 @@ if (isPostgres) {
 }
 
 export const db: DbInterface = dbInstance;
+export { isPostgres, pool };
 
 export async function initDatabase() {
   if (isPostgres) {
     try {
       console.log('[TechOS Database] Verificando tabelas no Supabase PostgreSQL...');
-      const plansCount = (await db.prepare('SELECT count(*) as count FROM plans').get()) as any;
-      console.log(`[TechOS Database] Supabase PostgreSQL conectado com sucesso! Planos cadastrados: ${plansCount?.count ?? 0}`);
+      const reg = await pool.query("SELECT to_regclass('public.plans') as tbl");
+      const hasPlans = reg.rows && reg.rows[0]?.tbl !== null;
+
+      if (!hasPlans) {
+        console.log('[TechOS Database] Tabelas não encontradas no Supabase. Executando auto-migration do schema...');
+        const schemaPath = path.resolve(process.cwd(), 'supabase', 'schema.sql');
+        let schemaSql = '';
+        if (fs.existsSync(schemaPath)) {
+          schemaSql = fs.readFileSync(schemaPath, 'utf8');
+        } else {
+          const parentSchema = path.resolve(process.cwd(), '..', 'supabase', 'schema.sql');
+          if (fs.existsSync(parentSchema)) {
+            schemaSql = fs.readFileSync(parentSchema, 'utf8');
+          }
+        }
+        if (schemaSql) {
+          await pool.query(schemaSql);
+          console.log('[TechOS Database] Schema PostgreSQL inicializado com sucesso no Supabase!');
+        } else {
+          console.warn('[TechOS Database] Arquivo supabase/schema.sql não localizado para auto-migration.');
+        }
+      } else {
+        const plansCount = (await db.prepare('SELECT count(*) as count FROM plans').get()) as any;
+        console.log(`[TechOS Database] Supabase PostgreSQL conectado com sucesso! Planos cadastrados: ${plansCount?.count ?? 0}`);
+      }
     } catch (err: any) {
-      console.error('[TechOS Database] Aviso de conexão com Supabase:', err.message);
+      console.error('[TechOS Database] Erro ao verificar/inicializar Supabase:', err.message);
     }
     return;
   }

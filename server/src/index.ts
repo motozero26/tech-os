@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { initDatabase } from './db.js';
+import { initDatabase, db, isPostgres, getEffectiveConnectionString } from './db.js';
 
 import authRouter from './routes/auth.js';
 import dashboardRouter from './routes/dashboard.js';
@@ -52,8 +52,52 @@ app.use('/api/subscription', subscriptionRouter);
 app.use('/api/saas', saasRouter);
 app.use('/api/fiscal', fiscalRouter);
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', system: 'TechOS API', time: new Date() });
+app.get('/api/health', async (req, res) => {
+  const isDiag = req.query.diag === '1';
+  if (!isDiag) {
+    return res.json({ status: 'ok', system: 'TechOS API', time: new Date() });
+  }
+
+  const envKeys = [
+    'POSTGRES_URL', 'DATABASE_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING',
+    'SUPABASE_URL', 'POSTGRES_HOST', 'POSTGRES_PORT'
+  ].filter(k => Boolean(process.env[k]));
+
+  let dbHost = 'none';
+  let dbPort = 'none';
+  const effectiveConn = getEffectiveConnectionString();
+  if (effectiveConn) {
+    try {
+      const parsed = new URL(effectiveConn.replace(/^postgres(ql)?:\/\//, 'http://'));
+      dbHost = parsed.hostname;
+      dbPort = parsed.port || '5432';
+    } catch {}
+  }
+
+  let dbTest: any = { status: 'untested' };
+  try {
+    const start = Date.now();
+    const testRes = await Promise.race([
+      db.prepare('SELECT 1 as connected').get(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('DB Timeout (3000ms)')), 3000))
+    ]);
+    dbTest = { status: 'connected', latency_ms: Date.now() - start, result: testRes };
+  } catch (err: any) {
+    dbTest = { status: 'error', error: err.message };
+  }
+
+  res.json({
+    status: 'ok',
+    system: 'TechOS API',
+    time: new Date(),
+    diagnostics: {
+      isPostgres,
+      available_env_vars: envKeys,
+      db_host: dbHost,
+      db_port: dbPort,
+      db_test: dbTest
+    }
+  });
 });
 
 // Error handler

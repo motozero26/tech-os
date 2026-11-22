@@ -173,12 +173,16 @@ router.post('/public-checkout', async (req: Request, res: Response) => {
 
 // Public payment status verification (for polling on checkout modal)
 router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
-  const paymentId = req.params.id;
-  const payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  const ref = req.params.id;
+  let payment = await db.prepare('SELECT * FROM subscription_payments WHERE gateway_payment_id = ?').get(ref) as any;
+  if (!payment && /^\d+$/.test(ref)) {
+    payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(Number(ref)) as any;
+  }
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
 
+  const paymentId = payment.id;
   const user = await db.prepare("SELECT * FROM users WHERE company_id = ? AND role = 'master' LIMIT 1").get(payment.company_id) as any;
   const comp = await db.prepare('SELECT access_expires_at, subscription_status FROM companies WHERE id = ?').get(payment.company_id) as any;
 
@@ -269,12 +273,16 @@ router.get('/public-check-payment/:id', async (req: Request, res: Response) => {
 
 // Public instant confirmation (for simulation, testing or manual confirmation)
 router.post('/public-confirm-payment/:id', async (req: Request, res: Response) => {
-  const paymentId = req.params.id;
-  const payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(paymentId) as any;
+  const ref = req.params.id;
+  let payment = await db.prepare('SELECT * FROM subscription_payments WHERE gateway_payment_id = ?').get(ref) as any;
+  if (!payment && /^\d+$/.test(ref)) {
+    payment = await db.prepare('SELECT * FROM subscription_payments WHERE id = ?').get(Number(ref)) as any;
+  }
   if (!payment) {
     return res.status(404).json({ error: 'Fatura não encontrada' });
   }
 
+  const paymentId = payment.id;
   const baseDate = new Date();
   baseDate.setDate(baseDate.getDate() + 30);
 
