@@ -41,20 +41,21 @@ if (isPostgres) {
   console.log('[TechOS Database] Inicializando conexão nativa não-bloqueante com Supabase PostgreSQL...');
   const { Pool } = require('pg');
 
-  let sslConfig: any = false;
   const conn = connectionString || '';
-  if (conn.includes('supabase') || conn.includes('pooler') || conn.includes('sslmode=require') || conn.includes('sslmode=')) {
-    sslConfig = { rejectUnauthorized: false };
+  if (conn.includes('supabase') || conn.includes('pooler')) {
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
   }
 
+  const cleanConn = conn.replace(/[?&]sslmode=[^&]+/g, '').replace(/\?&/, '?').replace(/[?&]$/, '');
+
   pool = new Pool({
-    connectionString: conn,
-    ssl: sslConfig,
+    connectionString: cleanConn,
+    ssl: { rejectUnauthorized: false },
     max: 2,
     idleTimeoutMillis: 10000,
-    connectionTimeoutMillis: 4000,
-    query_timeout: 6000,
-    statement_timeout: 6000,
+    connectionTimeoutMillis: 5000,
+    query_timeout: 8000,
+    statement_timeout: 8000,
   });
 
   pool.on('error', (err: any) => {
@@ -204,21 +205,25 @@ export async function initDatabase() {
 
       if (!hasPlans) {
         console.log('[TechOS Database] Tabelas não encontradas no Supabase. Executando auto-migration do schema...');
-        const schemaPath = path.resolve(process.cwd(), 'supabase', 'schema.sql');
+        const candidatePaths = [
+          path.resolve(__dirname, 'schema.sql'),
+          path.resolve(__dirname, '..', 'src', 'schema.sql'),
+          path.resolve(process.cwd(), 'supabase', 'schema.sql'),
+          path.resolve(process.cwd(), '..', 'supabase', 'schema.sql'),
+          path.resolve(process.cwd(), 'src', 'schema.sql')
+        ];
         let schemaSql = '';
-        if (fs.existsSync(schemaPath)) {
-          schemaSql = fs.readFileSync(schemaPath, 'utf8');
-        } else {
-          const parentSchema = path.resolve(process.cwd(), '..', 'supabase', 'schema.sql');
-          if (fs.existsSync(parentSchema)) {
-            schemaSql = fs.readFileSync(parentSchema, 'utf8');
+        for (const p of candidatePaths) {
+          if (fs.existsSync(p)) {
+            schemaSql = fs.readFileSync(p, 'utf8');
+            break;
           }
         }
         if (schemaSql) {
           await pool.query(schemaSql);
           console.log('[TechOS Database] Schema PostgreSQL inicializado com sucesso no Supabase!');
         } else {
-          console.warn('[TechOS Database] Arquivo supabase/schema.sql não localizado para auto-migration.');
+          console.warn('[TechOS Database] Arquivo schema.sql não localizado para auto-migration.');
         }
       } else {
         const plansCount = (await db.prepare('SELECT count(*) as count FROM plans').get()) as any;
